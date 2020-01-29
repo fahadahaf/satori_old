@@ -1,5 +1,5 @@
 ##############################################
-#Credits: This script is taken from https://github.com/MedChaabane/deepRAM
+#Credits: This script is based on https://github.com/MedChaabane/deepRAM
 #A Trebelsi, M Chaabane, A Ben-Hur, DeepRAM
 #############################################
 
