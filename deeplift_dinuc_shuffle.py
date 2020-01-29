@@ -1,5 +1,5 @@
 ##############################################
-#Credits: This script is taken from https://github.com/kundajelab/deeplift/blob/master/deeplift/dinuc_shuffle.py
+#Credits: This script is based on https://github.com/kundajelab/deeplift/blob/master/deeplift/dinuc_shuffle.py
 #part of DeepLIFT package by Anshul Kundaje et al.
 #############################################
 
