@@ -45,7 +45,7 @@ import pickle
 #from sklearn.model_selection import ParameterGrid
 import os
 import sys
-from extract_motifs_deepRAM import get_motif
+from extract_motifs import get_motif
 
 import matplotlib; matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -59,6 +59,9 @@ from multiprocessing import Pool
 from scipy.stats import fisher_exact 
 from statsmodels.stats.proportion import proportions_ztest
 from scipy.stats import mannwhitneyu
+
+from dinuc_shuffle import *
+from Bio.motifs import minimal
 
 import time
 ####################################################################################################################
@@ -779,8 +782,6 @@ def top_n_indexes(arr, n):
 #------------------------------------------------------------#
 
 #--------Get shuffled background-----------#
-from deeplift_dinuc_shuffle import *
-from Bio.motifs import minimal
 
 def get_shuffled_background(tst_loader,argspace): #this function randomly embed the consensus sequence of filter motifs in shuffled input sequences
     labels_array = np.asarray([i for i in range(0,argSpace.numLabels)])
