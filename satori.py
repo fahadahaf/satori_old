@@ -158,57 +158,6 @@ def parseArgs():
 ####################################################################################################################
 ##############################################--------Main Network Class--------####################################
 
-#credits: code taken from https://towardsdatascience.com/extending-pytorch-with-custom-activation-functions-2d8b065ef2fa
-class soft_exponential(nn.Module):
-    '''
-    Implementation of soft exponential activation.
-    Shape:
-        - Input: (N, *) where * means, any number of additional
-          dimensions
-        - Output: (N, *), same shape as the input
-    Parameters:
-        - alpha - trainable parameter
-    References:
-        - See related paper:
-        https://arxiv.org/pdf/1602.01321.pdf
-    Examples:
-        >>> a1 = soft_exponential(256)
-        >>> x = torch.randn(256)
-        >>> x = a1(x)
-    '''
-    def __init__(self, in_features, alpha = None):
-        '''
-        Initialization.
-        INPUT:
-            - in_features: shape of the input
-            - aplha: trainable parameter
-            aplha is initialized with zero value by default
-        '''
-        super(soft_exponential,self).__init__()
-        self.in_features = in_features
-
-        # initialize alpha
-        if alpha == None:
-            self.alpha = Parameter(torch.tensor(0.0)) # create a tensor out of alpha
-        else:
-            self.alpha = Parameter(torch.tensor(alpha)) # create a tensor out of alpha
-            
-        self.alpha.requiresGrad = True # set requiresGrad to true!
-
-    def forward(self, x):
-        '''
-        Forward pass of the function.
-        Applies the function to the input elementwise.
-        '''
-        if (self.alpha == 0.0):
-            return x
-
-        if (self.alpha < 0.0):
-            return - torch.log(1 - self.alpha * (x + self.alpha)) / self.alpha
-
-        if (self.alpha > 0.0):
-            return (torch.exp(self.alpha * x) - 1)/ self.alpha + self.alpha
-
 class PositionalEncoding(nn.Module):
     "Implement the PE function."
     def __init__(self, d_model, dropout, max_len=5000):
@@ -307,7 +256,7 @@ class Generalized_Net(nn.Module):
     
         self.fc3 = nn.Linear(in_features=self.MultiHeadSize, out_features=self.numClasses)
     
-#Credits: code from: http://nlp.seas.harvard.edu/2018/04/01/attention.html      
+#---Credits: code from: http://nlp.seas.harvard.edu/2018/04/01/attention.html--------#      
     def attention(self, query, key, value, mask=None, dropout=0.0):
         "Compute 'Scaled Dot Product Attention'"
         d_k = query.size(-1)
@@ -317,7 +266,8 @@ class Generalized_Net(nn.Module):
 
         p_attn = F.dropout(p_attn, p=dropout)
         return torch.matmul(p_attn, value), p_attn
-    
+ #------------------------------------------------------------------------------------#
+
     def forward(self, inputs):
         #pdb.set_trace()
 
@@ -1058,7 +1008,6 @@ cudnn.benchmark = True
 #w2v_path = 'Word2Vec_Models/'
 #######################
 
-#################--------------Main Loop-------------------#####################
 param_data = np.loadtxt(argSpace.hparamfile,dtype=str)
 output_dir = argSpace.directory
 
@@ -1247,8 +1196,7 @@ if num_labels == 2:
     preds = res_test[2][:,1]
     if argSpace.verbose:
         print("Test Loss and AUC: ",test_loss, test_auc)
-    labels = res_test[2][:,0]
-    preds = res_test[2][:,1]
+
     fpr,tpr,thresholds = metrics.roc_curve(labels,preds)
     roc_dict = {'fpr':fpr, 'tpr':tpr, 'thresholds':thresholds}
     with open(output_dir+'/ROC_dict.pckl','wb') as f:
