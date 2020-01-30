@@ -333,7 +333,7 @@ class Generalized_Net(nn.Module):
         if self.useRNN:
             output, _ = self.RNN(output)
             F_RNN = output[:,:,:self.RNN_hiddenSize]
-            R_RNN = output[:,:,self.RNN_hiddenSize:] #before I wrote :self.RNN_hiddenSize for the reverse part too (forwarnRNNonly results are based on that). That is basically forward RNN concatenated with itself (perhaps very similar to single direction LSTM)
+            R_RNN = output[:,:,self.RNN_hiddenSize:] 
             output = torch.cat((F_RNN,R_RNN),2)
             output = self.dropoutRNN(output)
         
