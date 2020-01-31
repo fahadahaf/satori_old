@@ -1,7 +1,6 @@
 numMultiHeads	8	#numMultiHeads
 singlehead_size	32	#SingleHeadSize
 multihead_size	100	#MultiHeadSize
-pooling_val	6	#if use pooling at single head level, size of pooling
 readout_strategy	normalize	#read out layer type/strategy
 use_RNN	True	#use RNN in the model
 use_CNN	True	#use CNN layer
