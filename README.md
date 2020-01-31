@@ -1,5 +1,5 @@
 # SATORI
-Self ATtentiOn based Regulatory Interactions
+SATORI is a Self-ATtention based deep learning model to capture Regulatory element Interactions in genomic sequences. It can be used to infer a global landscape of interactions in a given genomic dataset, without a computationally-expensive post-processing step.
 
 
 ## Usage
