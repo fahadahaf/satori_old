@@ -2,16 +2,16 @@
 SATORI is a Self-ATtention based deep learning model to capture Regulatory element Interactions in genomic sequences. It can be used to infer a global landscape of interactions in a given genomic dataset, without a computationally-expensive post-processing step.
 
 ## Dependency
-SATORI is written in python 3. The following packages are required (the version used is provided):
-PyTorch (version 1.2.0)
-scikit-learn (vresion 0.21.3)
-scipy (version 1.4.1)
-numpy (version 1.17.2)
-pandas (version 0.25.1)
-statsmodels (version 0.9.0)
-matplotlib (vresion 3.1.1)
-fastprogress (version 0.1.21)
-biopython (version 1.75)
+SATORI is written in python 3. The following packages are required (the version used is provided):  
+PyTorch (version 1.2.0)  
+scikit-learn (vresion 0.21.3)  
+scipy (version 1.4.1)  
+numpy (version 1.17.2)  
+pandas (version 0.25.1)  
+statsmodels (version 0.9.0)  
+matplotlib (vresion 3.1.1)  
+fastprogress (version 0.1.21)  
+biopython (version 1.75)  
 bottleneck (version 1.3.1)
 
 ## Usage
