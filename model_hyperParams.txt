@@ -4,4 +4,15 @@ multihead_size	100	#MultiHeadSize
 readout_strategy	normalize	#read out layer type/strategy
 use_RNN	True	#use RNN in the model
 use_CNN	True	#use CNN layer
+use_posEnc	False	#use positional encoding
 use_CNNpool	True	#use CNN pooling
+batch_size	172	#batch size
+num_epochs	30	#number of epochs
+RNNhiddenSize	100	#hidden size of the RNN
+CNN_filters	200	#number of CNN filters
+CNN_filtersize	13	#Size of CNN filter
+CNN_poolsize	6	#Size of CNN pooling layer
+get_pattn	True	#get Prob Attention matrices. This must be true for attention figures and feature interactions analysis
+get_CNNout	True	#get first layer CNN output. This must be true for motif analysis as well as feature interactions.
+get_seqs	True	#get Sequences for correpsonding batches. This must be true for motif analysis and feature interactions.
+input_channels	4	#number of input channels, sequence with 1 hot encoding
