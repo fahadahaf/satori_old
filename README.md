@@ -3,16 +3,18 @@ SATORI is a Self-ATtention based deep learning model to capture Regulatory eleme
 
 ## Dependency
 SATORI is written in python 3. The following packages are required (the version used is provided):  
-PyTorch (version 1.2.0)  
-scikit-learn (vresion 0.21.3)  
-scipy (version 1.4.1)  
-numpy (version 1.17.2)  
-pandas (version 0.25.1)  
-statsmodels (version 0.9.0)  
-matplotlib (vresion 3.1.1)  
-fastprogress (version 0.1.21)  
-biopython (version 1.75)  
-bottleneck (version 1.3.1)
+[PyTorch (version 1.2.0)](https://pytorch.org)  
+[scikit-learn (vresion 0.21.3)](https://scikit-learn.org/stable/)  
+[scipy (version 1.4.1)](www.scipy.org)  
+[numpy (version 1.17.2)](www.numpy.org)  
+[pandas (version 0.25.1)](www.pandas.pydata.org)  
+[statsmodels (version 0.9.0)](http://www.statsmodels.org/stable/index.html)  
+[matplotlib (vresion 3.1.1)](https://matplotlib.org)  
+[fastprogress (version 0.1.21)](https://github.com/fastai/fastprogress)  
+[biopython (version 1.75)](https://biopython.org)  
+[bottleneck (version 1.3.1)](https://pypi.org/project/Bottleneck/)  
+[MEME suite](http://meme-suite.org/doc/download.html)  
+[WebLogo](https://weblogo.berkeley.edu)
 
 ## Usage
 ```
@@ -105,3 +107,24 @@ optional arguments:
                         validation sets (default False). Useful for
                         interaction/motif analysis.
 ```
+
+## Datasets
+The datasets described in the paper are provided in the **Data** directory.
+
+## Running SATORI
+1. Make the main scripty (satori.py) executable:
+```
+chmod +x satori.py
+```  
+2. Optionally, add the path to your environment variables. 
+
+3. Run SATORI using the following (example for the human promoters dataset):
+```
+satori.py -v -o HumanPromotersExperiment -m train -w 8 -b shuffle --motifanalysis -i --tomtompval 0.05 --tomtomdist ed --intseqlimit -1 -s --numlabels 164  --tomtompath PATH-TO-TOMTOM-TOOL --database PATH-TO-MEME-TF-DATABASE --annotate No Data/Human_Promoters/encode_roadmap_inPromoter.txt model_hyperParams.txt
+```  
+PATH-TO-TOMTOM-TOOL: path to TomTom tool in the MEME suite.  
+PATH-TO-MEME-TF-DATABASE: path to the TF database to use (MEME suite comes with different databases).
+
+
+## Processing Results
+For each experiment, the corresponding Jupyter notebooks are provided in **process_results** directory.
