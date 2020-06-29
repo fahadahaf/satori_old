@@ -13,7 +13,6 @@ from torch import optim # import optimizers for demonstrations
 
 from fastprogress import progress_bar
 from scipy.special import comb  
-
 import pdb
 
 import pandas as pd
@@ -43,7 +42,7 @@ import pickle
 #from sklearn.model_selection import ParameterGrid
 import os
 import sys
-from extract_motifs_deepRAM import get_motif
+from extract_motifs_deepRAM_withActivationScore import get_motif
 
 import matplotlib; matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -55,6 +54,7 @@ from multiprocessing import Process
 from multiprocessing import Pool
 
 from scipy.stats import fisher_exact 
+from scipy.stats import mannwhitneyu
 from statsmodels.stats.proportion import proportions_ztest
 
 import time
@@ -130,6 +130,9 @@ def parseArgs():
     parser.add_argument('--tomtomdist', dest='tomtomDist',type=str,
                         action='store',default = 'pearson',
                         help="TomTom distance parameter (pearson, kullback, ed etc). Default is pearson. See TomTom help from MEME suite.")
+    parser.add_argument('--attrbatchsize', dest='attrBatchSize',type=int,
+                        action='store',default = 12,
+                        help="Batch size used while calculating attributes. Default is 12.")
     parser.add_argument('--tomtompval', dest='tomtomPval',type=float,
                         action='store',default = 0.05,
                         help="Adjusted p-value cutoff from TomTom. Default is 0.05.")
@@ -412,8 +415,8 @@ class Generalized_Net(nn.Module):
 		output = self.fc3(output)
 	
 		assert not torch.isnan(output).any()
-	
-		return output,pAttn_concat
+		
+		return output
     
 ######################################################################################################################   
 
@@ -575,21 +578,21 @@ def trainRegularMC(model, device, iterator, optimizer, criterion):
         #pdb.set_trace()
         data, target = data.to(device,dtype=torch.float), target.to(device,dtype=torch.float)
         optimizer.zero_grad()
-        outputs,_ = model(data)
+        outputs = model(data)
         loss = criterion(outputs, target)
         #loss = F.binary_cross_entropy(outputs, target)
         
         labels = target.cpu().numpy()
         
-        #softmax = torch.nn.Softmax(dim=0) #along columns
-        #pred = softmax(outputs)
-        
+		#softmax = torch.nn.Softmax(dim=0) #along columns
+        #should be using sigmoid here
         sigmoid = torch.nn.Sigmoid()
+			
+		#pred = softmax(outputs)
         pred = sigmoid(outputs)
-
-
         pred = pred.cpu().detach().numpy()
-        
+
+
         all_labels+=labels.tolist()
         all_preds+=pred.tolist()
 
@@ -616,7 +619,7 @@ def trainRegular(model, device, iterator, optimizer, criterion):
         #pdb.set_trace()
         data, target = data.to(device,dtype=torch.float), target.to(device,dtype=torch.long)
         optimizer.zero_grad()
-        outputs,_ = model(data)
+        outputs = model(data)
         loss = criterion(outputs, target)
         #loss = F.binary_cross_entropy(outputs, target)
         
@@ -680,7 +683,8 @@ def evaluateRegularMC(net, iterator, criterion, out_dirc, getPAttn=False, storeP
 
             data, target = data.to(device,dtype=torch.float), target.to(device, dtype=torch.float)
             # Model computations
-            outputs,PAttn = net(data)
+            outputs = net(data)
+            PAttn = [] #just a dummy
             
             loss = criterion(outputs, target)
             #loss = F.binary_cross_entropy(outputs, target)
@@ -688,11 +692,11 @@ def evaluateRegularMC(net, iterator, criterion, out_dirc, getPAttn=False, storeP
             labels=target.cpu().numpy()
             
             #softmax = torch.nn.Softmax(dim=0) #along columns
-            #pred = softmax(outputs)
-            
+            #should be using sigmoid here
             sigmoid = torch.nn.Sigmoid()
-            pred = sigmoid(outputs)
 			
+			#pred = softmax(outputs)
+            pred = sigmoid(outputs)
             pred = pred.cpu().detach().numpy()
         
             #pred = pred.cpu().detach().numpy()
@@ -793,7 +797,8 @@ def evaluateRegular(net, iterator, criterion,out_dirc,getPAttn=False, storePAttn
 
             data, target = data.to(device,dtype=torch.float), target.to(device,dtype=torch.long)
             # Model computations
-            outputs,PAttn = net(data)
+            outputs = net(data)
+            PAttn = []
             
             loss = criterion(outputs, target)
             #loss = F.binary_cross_entropy(outputs, target)
@@ -1201,7 +1206,7 @@ if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
 #save arguments to keep record
-with open(argSpace.directory+'/arguments_v9.txt','w') as f:
+with open(argSpace.directory+'/arguments.txt','w') as f:
 	f.writelines(str(argSpace))
 
 if argSpace.verbose:
@@ -1371,7 +1376,7 @@ except:
 	print("No pre-trained model found! Please run with --mode set to train.")
 
 if num_labels == 2:
-	res_test = evaluateRegular(net, test_loader, criterion, output_dir+"/Stored_Values", getPAttn = genPAttn,
+	res_test = evaluateRegular(net, test_loader, criterion, output_dir+"/Stored_Values", getPAttn = False, #getPAttn
 										storePAttn = argSpace.storeInterCNN, getCNN = getCNNout,
 										storeCNNout = argSpace.storeInterCNN, getSeqs = getSequences)
 										
@@ -1391,7 +1396,7 @@ if num_labels == 2:
 	some_res.append([[test_loss,test_auc]])
 	np.savetxt(output_dir+'/loss_and_auc.txt',some_res,delimiter='\t',fmt='%s')
 else:
-	res_test = evaluateRegularMC(net, test_loader, criterion, output_dir+"/Stored_Values", getPAttn = genPAttn,
+	res_test = evaluateRegularMC(net, test_loader, criterion, output_dir+"/Stored_Values", getPAttn = False, #genPAttn,
 										storePAttn = argSpace.storeInterCNN, getCNN = getCNNout,
 										storeCNNout = argSpace.storeInterCNN, getSeqs = getSequences)
 	test_loss = res_test[0]
@@ -1400,6 +1405,9 @@ else:
 		print("Test Loss and mean AUC: ",test_loss, np.mean(test_auc))
 
 	np.savetxt(output_dir+'/per_class_AUC.txt',test_auc,delimiter='\t',fmt='%s')
+
+
+#print(lohahi)
 
 
 ###############################################################################
@@ -1433,13 +1441,26 @@ def motif_analysis(res_test, output_dir, argSpace, for_background = False):
 		
 	else:
 		tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
+		#--Do I need to do the following? that is enrich motifs only in those sequences which qualify based on the precision value--#
+		#--Problem with that is how do I handle this approach for background sequences?
+		#if argSpace.useAll == True:
+		#	tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
+		#else:
+		#	tp_indices=[]                                                                                                                                                                                    
+		#	batch_labels = per_batch_labelPreds['labels']                                                                                                                                                                         
+		#	batch_preds = per_batch_labelPreds['preds']                                                                                                                                                                           
+		#	for e in range(0,batch_labels.shape[0]):                                                                                                                                                                        
+		#		ex_labels = batch_labels[e].astype(int)                                                                                                                                                                     
+		#		ex_preds = batch_preds[e]                                                                                                                                                                                   
+		#		ex_preds = np.asarray([i>=argSpace.precisionLimit for i in ex_preds]).astype(int)                                                                                                                                               
+		#		tp_indices.append(e)
 	
 	NumExamples += len(tp_indices)
 		
 	CNNoutput = CNNoutput[tp_indices]
 	Seqs = Seqs[tp_indices]
 	
-	for k in range(1,len(res_test[3])):
+	for k in range(1,len(res_test[4])):
 		if argSpace.verbose:
 			print("batch number: ",k)
 			
@@ -1460,13 +1481,24 @@ def motif_analysis(res_test, output_dir, argSpace, for_background = False):
 				tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)]
 		else:
 			tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
+			#if argSpace.useAll == True:
+			#	tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
+			#else:
+			#	tp_indices=[]                                                                                                                                                                                    
+			#	batch_labels = per_batch_labelPreds['labels']                                                                                                                                                                         
+			#	batch_preds = per_batch_labelPreds['preds']                                                                                                                                                                           
+			#	for e in range(0,batch_labels.shape[0]):                                                                                                                                                                        
+			#		ex_labels = batch_labels[e].astype(int)                                                                                                                                                                     
+			#		ex_preds = batch_preds[e]                                                                                                                                                                                   
+			#		ex_preds = np.asarray([i>=argSpace.precisionLimit for i in ex_preds]).astype(int)                                                                                                                                               
+			#		tp_indices.append(e)
 		
 		NumExamples += len(tp_indices)
 		
 		CNNoutput = np.concatenate((CNNoutput,per_batch_CNNoutput[tp_indices]),axis=0)
 		Seqs = np.concatenate((Seqs,per_batch_seqs[tp_indices]))
 
-
+	#pdb.set_trace()
 	#get_motif(CNNWeights, CNNoutput, Seqs, dir1 = 'Interactions_Test_noEmbdAttn_'+prefix,embd=True,data='DNA',kmer=kmer_len,s=stride,tomtom='/s/jawar/h/nobackup/fahad/MEME_SUITE/meme-5.0.3/src/tomtom') 
 	
 	if argSpace.tfDatabase == None:
@@ -1526,35 +1558,24 @@ if argSpace.motifAnalysis:
 			
 		test_loader_bg = DataLoader(data_bg,batch_size=batchSize,num_workers=argSpace.numWorkers)	
 		if num_labels==2:
-			res_test_bg = evaluateRegular(net, test_loader_bg, criterion, out_dirc = output_dir+"/Temp_Data/Stored_Values", getPAttn = genPAttn,
+			res_test_bg = evaluateRegular(net, test_loader_bg, criterion, out_dirc = output_dir+"/Temp_Data/Stored_Values", getPAttn = False,#genPAttn,
 											storePAttn = argSpace.storeInterCNN, getCNN = getCNNout,
 											storeCNNout = argSpace.storeInterCNN, getSeqs = getSequences)
 			motif_dir_neg,numNegExamples = motif_analysis(res_test_bg, output_dir, argSpace, for_background = True) #in this case the background comes from shuffled sequences and won't be using negative predictions
 		else:
-			res_test_bg = evaluateRegularMC(net, test_loader_bg, criterion, out_dirc = output_dir+"/Temp_Data/Stored_Values", getPAttn = genPAttn,
+			res_test_bg = evaluateRegularMC(net, test_loader_bg, criterion, out_dirc = output_dir+"/Temp_Data/Stored_Values", getPAttn = False,#genPAttn,
 											storePAttn = argSpace.storeInterCNN, getCNN = getCNNout,
 											storeCNNout = argSpace.storeInterCNN, getSeqs = getSequences)
 			motif_dir_neg,numNegExamples = motif_analysis(res_test_bg, output_dir, argSpace, for_background = True) #for_background doesn't matter in this case since num_labels are greater than 2
+		
+		
+			
 		
 		
 else: #this is when we want to skip motif analysis (if its already done) we will need motif directories for downstream analyses
 	motif_dir = output_dir + '/Motif_Analysis'
 	if argSpace.intBackground != None:
 		motif_dir_neg = output_dir + '/Motif_Analysis_Negative'
-		#print(lohahi)
-
-	if argSpace.intBackground == 'shuffle':
-		bg_prefix = get_shuffled_background_v3(test_loader,argSpace) #get_shuffled_background_v2(test_loader, params['CNN_filters'], params['CNN_filtersize'], argSpace)  the version 2 doesn't work that well (average AUC 0.50 and 0 motifs in background)
-		#data_bg = ProcessedDataVersion2(bg_prefix,num_labels)
-		if argSpace.deskLoad == False:
-			data_bg = ProcessedDataVersion2(bg_prefix,num_labels) #get all data
-		else:
-			data_bg = ProcessedDataVersion2A(bg_prefix,num_labels)
-				
-		test_loader_bg = DataLoader(data_bg,batch_size=batchSize,num_workers=argSpace.numWorkers)	
-		res_test_bg = evaluateRegularMC(net, test_loader_bg, criterion, out_dirc = output_dir+"/Temp_Data/Stored_Values", getPAttn = genPAttn,
-												storePAttn = argSpace.storeInterCNN, getCNN = getCNNout,
-												storeCNNout = argSpace.storeInterCNN, getSeqs = getSequences)
 	
 	##########################################################################
 ####################################################################################
@@ -1562,60 +1583,60 @@ else: #this is when we want to skip motif analysis (if its already done) we will
 ####################################################################################
 #########------------Attention Probabilities Analysis-----------------##############
 
-if argSpace.attnFigs:
-	Attn_dir = output_dir + '/Attention_Figures'
+#if argSpace.attnFigs:
+	#Attn_dir = output_dir + '/Attention_Figures'
 
-	if not os.path.exists(Attn_dir):
-	    os.makedirs(Attn_dir)
+	#if not os.path.exists(Attn_dir):
+	    #os.makedirs(Attn_dir)
 	
-	plt.close('all')
-	plt.rcParams["figure.figsize"] = (9,5)
+	#plt.close('all')
+	#plt.rcParams["figure.figsize"] = (9,5)
 	
-	count = 0
-	for k in range(0,len(Prob_Attention_All)): #going through all batches
-		if count == argSpace.intSeqLimit:
-			break
+	#count = 0
+	#for k in range(0,len(Prob_Attention_All)): #going through all batches
+		#if count == argSpace.intSeqLimit:
+			#break
 		
 
-		PAttn = Prob_Attention_All[k]
-		if argSpace.storeInterCNN:
-			with open(PAttn,'rb') as f:
-				PAttn = pickle.load(f)
+		#PAttn = Prob_Attention_All[k]
+		#if argSpace.storeInterCNN:
+			#with open(PAttn,'rb') as f:
+				#PAttn = pickle.load(f)
 		
 		
-		per_batch_labelPreds = res_test[4][k]
-		if num_labels == 2:
-			tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)] #pos classified examples > 0.6
-		else:
-			tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
-		#tp_indices = tp_indices[:10] #get top 5 from each batch
+		#per_batch_labelPreds = res_test[4][k]
+		#if num_labels == 2:
+			#tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)] #pos classified examples > 0.6
+		#else:
+			#tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
+		##tp_indices = tp_indices[:10] #get top 5 from each batch
 		
-		feat_size = PAttn.shape[1]
+		#feat_size = PAttn.shape[1]
 		
-		#ex = 165#7
-		#plt.imshow(PAttn[ex,:,99*i:99*(i+1)])
-		for ex in tp_indices:
-			count += 1
-			if count == argSpace.intSeqLimit:
-				break
-			plt.close('all')
-			fig, ax = plt.subplots(nrows=2, ncols=4)
+		##ex = 165#7
+		##plt.imshow(PAttn[ex,:,99*i:99*(i+1)])
+		#for ex in tp_indices:
+			#count += 1
+			#if count == argSpace.intSeqLimit:
+				#break
+			#plt.close('all')
+			#fig, ax = plt.subplots(nrows=2, ncols=4)
 		
-			for i in range(0,8):
-				plt.subplot(2,4,i+1)
-				attn_mat = PAttn[ex,:,feat_size*i:feat_size*(i+1)]
-				plt.imshow(attn_mat)
-				max_loc = np.unravel_index(attn_mat.argmax(), attn_mat.shape)
-				plt.title('Single Head #'+str(i)+' Max Loc: '+str(max_loc),size=6)
-				plt.grid(False)
+			#for i in range(0,8):
+				#plt.subplot(2,4,i+1)
+				#attn_mat = PAttn[ex,:,feat_size*i:feat_size*(i+1)]
+				#plt.imshow(attn_mat)
+				#max_loc = np.unravel_index(attn_mat.argmax(), attn_mat.shape)
+				#plt.title('Single Head #'+str(i)+' Max Loc: '+str(max_loc),size=6)
+				#plt.grid(False)
 			
-			#plt.clf()
-			#print('Done for: ',str(ex))
+			##plt.clf()
+			##print('Done for: ',str(ex))
 			
-			plt.savefig(Attn_dir+'/'+'Batch-'+str(k)+'_PosExample-'+str(ex)+'_AttenMatrices.pdf')
+			#plt.savefig(Attn_dir+'/'+'Batch-'+str(k)+'_PosExample-'+str(ex)+'_AttenMatrices.pdf')
 		
-		print("Done for batch: ",k)
-		plt.close('all')
+		#print("Done for batch: ",k)
+		#plt.close('all')
 #######################################################################################
 
 ########################################################################################
@@ -1623,6 +1644,14 @@ if argSpace.attnFigs:
 #-----------Calculating Positive and Negative population------------#
 per_batch_labelPreds = res_test[4]
 #print(lohahi)
+
+#	batch_labels = per_batch_labelPreds['labels']                                                                                                                                                                         
+#	batch_preds = per_batch_labelPreds['preds']                                                                                                                                                                           
+#	for e in range(0,batch_labels.shape[0]):                                                                                                                                                                        
+#		ex_labels = batch_labels[e].astype(int)                                                                                                                                                                     
+#		ex_preds = batch_preds[e]                                                                                                                                                                                   
+#		ex_preds = np.asarray([i>=argSpace.precisionLimit for i in ex_preds]).astype(int)                                                                                                                                               
+#		tp_indices.append(e)
 
 numPosExamples = 0
 if argSpace.useAll == False and argSpace.numLabels != 2:
@@ -1693,14 +1722,24 @@ def get_filters_in_individual_seq(sdata):
 		for k in range(0,len(filter_data),2):
 			hdr = filter_data[k].split('_')[0]
 			if hdr == header:
-				pos = int(filter_data[k].split('_')[-1])
+				#print(hdr,header)
+				pos = int(filter_data[k].split('_')[-2])
+				act_val = float(filter_data[k].split('_')[-1])
 				pooled_pos = int(pos/CNNfirstpool)
-				key = pooled_pos#header+'_'+str(pooled_pos)
+				key = pos#pooled_pos #we are no longer dealing with attention so lets use the actual position of the filter activation instead
+				#key = 'filter'+str(j)
 				if key not in s_info_dict:
-					s_info_dict[key] = ['filter'+str(j)]
+					#s_info_dict[key] = [(pos,act_val)]
+					s_info_dict[key] = [('filter'+str(j),act_val)]
 				else:
-					if 'filter'+str(j) not in s_info_dict[key]:
-						s_info_dict[key].append('filter'+str(j))
+					if 'filter'+str(j) not in s_info_dict[key][0]:
+					#if pos not in s_info_dict[key][0]:
+						if act_val > s_info_dict[key][0][1]:
+							#s_info_dict[key].append(('filter'+str(j),act_val))
+							#s_info_dict[key] = [(pos,act_val)]#
+							s_info_dict[key] = [('filter'+str(j),act_val)]
+	#print({header: s_info_dict},hdr,header)
+	
 	return {header: s_info_dict}
 						
 def get_filters_in_seq_dict(all_seqs,motif_dir,num_filters,CNNfirstpool,numWorkers=1):
@@ -1728,953 +1767,955 @@ def get_filters_in_seq_dict(all_seqs,motif_dir,num_filters,CNNfirstpool,numWorke
 	return seq_info_dict
 	
 	
-def get_matching_filters_all(all_seqs, num_features, sequence_len, CNNfirstpool, num_filters, motif_dir):
-	filter_data_dict = {}
-	for i in range(0,200):
-		filter_data = np.loadtxt(motif_dir+'/filter'+str(i)+'_logo.fa',dtype=str)
-		filter_data_dict['filter'+str(i)] = filter_data
-		
-	filtersDict = {}
-	
-	for ii in progress_bar(range(0,all_seqs.shape[0])):
-		headerQ = all_seqs[ii][0]
-		for posQ in progress_bar(range(0,num_features)):
-			for i in range(0,num_filters):
-				filter_data = filter_data_dict['filter'+str(i)]#np.loadtxt(motif_dir+'/filter'+str(i)+'_logo.fa',dtype=str)
-				for j in range(0,len(filter_data),2):
-					hdr = filter_data[j].split('_')[0]#+'_'+filter_data[j].split('_')[1]
-					if hdr == headerQ: #header of the current sequence matches header in the filter
-						pos = int(filter_data[j].split('_')[-1])
-						pooled_pos = int(pos/CNNfirstpool)
-						if pooled_pos == posQ:
-							key = headerQ+'^'+str(posQ)#'filter'+str(i)
-							if key not in filtersDict:
-								filtersDict[key] = ['filter'+str(i)]
-							else:
-								if 'filter'+str(i) not in filtersDict[key]:
-									filtersDict[key].append('filter'+str(i))
-				#key = str(pooled_pos)+'_'+str(pooled_pos*CNNfirstpool)+'-'+str(pooled_pos*CNNfirstpool+5)
-				#pooled_pos_dict[key].append(['filter'+str(i),pos])
-	
-	return filtersDict
+#############----------DFIM based interactions---------------#############
 
+#import shap
+from deeplift.visualization import viz_sequence
+from captum.attr import (
+    GradientShap,
+    DeepLift,
+    DeepLiftShap,
+    IntegratedGradients,
+    LayerConductance,
+    NeuronConductance,
+    NoiseTunnel,
+)
 
-def get_matching_filters(posQ, headerQ, sequence_len, CNNfirstpool, num_filters, motif_dir):
-	filtersDict = {}
-	
-	for i in range(0,num_filters):
-		filter_data = np.loadtxt(motif_dir+'/filter'+str(i)+'_logo.fa',dtype=str)
-		for j in range(0,len(filter_data),2):
-			hdr = filter_data[j].split('_')[0]#+'_'+filter_data[j].split('_')[1]
-			if hdr == headerQ: #header of the current sequence matches header in the filter
-				pos = int(filter_data[j].split('_')[-1])
-				pooled_pos = int(pos/CNNfirstpool)
-				if pooled_pos == posQ:
-					key = 'filter'+str(i)
-					if key not in filtersDict:
-						filtersDict[key] = [[pooled_pos,pos]]
-					else:
-						filtersDict[key].append([pooled_pos,pos])
-				#key = str(pooled_pos)+'_'+str(pooled_pos*CNNfirstpool)+'-'+str(pooled_pos*CNNfirstpool+5)
-				#pooled_pos_dict[key].append(['filter'+str(i),pos])
-	
-	return filtersDict
+from Bio.SeqUtils import GC
+from sklearn.preprocessing import normalize
 
 
 
-def score_individual_head(data):
-	
-	count,header,seq_inf_dict,k,ex,params,tomtom_data,attn_cutoff,sequence_len,CNNfirstpool,num_filters,motif_dir,feat_size,storeInterCNN,considerTopHit = data
-	#print(k,ex)
-	global Prob_Attention_All# = res_test[3]
-	global Seqs# = res_test[6]
-	global LabelPreds# = res_test[4]
-	#global Filter_Intr_Attn
-	#global Filter_Intr_Pos
-	global Filter_Intr_Keys
-	
-	filter_Intr_Attn = np.ones(len(Filter_Intr_Keys))*-1
-	filter_Intr_Pos = np.ones(len(Filter_Intr_Keys)).astype(int)*-1
-	
-	y_ind = count#(k*params['batch_size']) + ex
-	
-	PAttn = Prob_Attention_All[k]
-	if storeInterCNN:
-		with open(PAttn,'rb') as f:
-			PAttn = pickle.load(f)
-	
-	#filter_intr_dict = {}
-	
-	attn_mat = PAttn[ex,:,:]
-	
-	attn_mat = np.asarray([attn_mat[:,feat_size*i:feat_size*(i+1)] for i in range(0,params['numMultiHeads'])]) 
-	attn_mat = np.max(attn_mat, axis=0) #out of the 8 attn matrices, get the max value at the corresponding positions
-	
-	for i in range(0, attn_mat.shape[0]):
-		if i not in seq_inf_dict:
-			continue
-		for j in range(0, attn_mat.shape[1]):
-			#pdb.set_trace()
-			if j not in seq_inf_dict:
-				continue
-			if i==j:
-				continue
-			max_loc = [i,j]#attn_mat[i,j]
-			
-			pos_diff = CNNfirstpool * abs(max_loc[0]-max_loc[1])
-			
-			KeyA = i #seq_inf_dict already is for the current header and we just need to specify the Pooled position
-			KeyB = j 
-			
-			attn_val = attn_mat[i,j]
-			
-			all_filters_posA = seq_inf_dict[KeyA]
-			all_filters_posB = seq_inf_dict[KeyB]
-			
-			for keyA in all_filters_posA:
-				for keyB in all_filters_posB:
-					if keyA == keyB:
-						continue
-					intr = keyA+'<-->'+keyB
-					rev_intr = keyB+'<-->'+keyA
-					if intr in Filter_Intr_Keys:
-						x_ind = Filter_Intr_Keys[intr]
-					elif rev_intr in Filter_Intr_Keys:
-						x_ind = Filter_Intr_Keys[rev_intr]
-							
-					if attn_val > filter_Intr_Attn[x_ind]:#[y_ind]:
-						filter_Intr_Attn[x_ind] = attn_val #[y_ind] = attn_val
-					filter_Intr_Pos[x_ind] = pos_diff#[y_ind] = pos_diff
-						
-				
-	return y_ind,filter_Intr_Attn,filter_Intr_Pos
-			
-			
-
-def score_individual_head_bg(data):
-	
-	count,header,seq_inf_dict,k,ex,params,tomtom_data,attn_cutoff,sequence_len,CNNfirstpool,num_filters,motif_dir,feat_size,storeInterCNN,considerTopHit = data
-	
-	global Prob_Attention_All_neg# = res_test[3]
-	global Seqs_neg# = res_test[6]
-	global LabelPreds_neg# = res_test[4]
-	#global Filter_Intr_Attn
-	#global Filter_Intr_Pos
-	global Filter_Intr_Keys
-	
-	filter_Intr_Attn = np.ones(len(Filter_Intr_Keys))*-1
-	filter_Intr_Pos = np.ones(len(Filter_Intr_Keys)).astype(int)*-1
-	
-	y_ind = count#(k*params['batch_size']) + ex
-	
-	PAttn = Prob_Attention_All_neg[k]
-	if storeInterCNN:
-		with open(PAttn,'rb') as f:
-			PAttn = pickle.load(f)
-	
-	attn_mat = PAttn[ex,:,:]
-	
-	attn_mat = np.asarray([attn_mat[:,feat_size*i:feat_size*(i+1)] for i in range(0,params['numMultiHeads'])]) 
-	attn_mat = np.max(attn_mat, axis=0) #out of the 8 attn matrices, get the max value at the corresponding positions
-	
-	for i in range(0, attn_mat.shape[0]):
-		if i not in seq_inf_dict:
-			continue
-		for j in range(0, attn_mat.shape[1]):
-			#pdb.set_trace()
-			if j not in seq_inf_dict:
-				continue
-			if i==j:
-				continue
-			max_loc = [i,j]#attn_mat[i,j]
-			
-			pos_diff = CNNfirstpool * abs(max_loc[0]-max_loc[1])
-			
-			KeyA = i #seq_inf_dict already is for the current header and we just need to specify the Pooled position
-			KeyB = j 
-			
-			attn_val = attn_mat[i,j]
-			
-			all_filters_posA = seq_inf_dict[KeyA]
-			all_filters_posB = seq_inf_dict[KeyB]
-			
-			for keyA in all_filters_posA:
-				for keyB in all_filters_posB:
-					if keyA == keyB:
-						continue
-					intr = keyA+'<-->'+keyB
-					rev_intr = keyB+'<-->'+keyA
-					if intr in Filter_Intr_Keys:
-						x_ind = Filter_Intr_Keys[intr]
-					elif rev_intr in Filter_Intr_Keys:
-						x_ind = Filter_Intr_Keys[rev_intr]
-							
-					if attn_val > filter_Intr_Attn[x_ind]:#[y_ind]:
-						filter_Intr_Attn[x_ind] = attn_val #[y_ind] = attn_val
-					filter_Intr_Pos[x_ind] = pos_diff#[y_ind] = pos_diff
-						
-				
-	return y_ind,filter_Intr_Attn,filter_Intr_Pos
-
-
-#def estimate_interactions(Seqs, Prob_Attention_All, LabelPreds, num_filters, params, tomtom_data, motif_dir, verbose = False, CNNfirstpool = 6, sequence_len = 200, pos_score_cutoff = 0.65, seq_limit = -1, attn_cutoff = 0.25, for_background = False, numWorkers=1):
-def estimate_interactions(num_filters, params, tomtom_data, motif_dir, verbose = False, CNNfirstpool = 6, sequence_len = 200, pos_score_cutoff = 0.65, seq_limit = -1, attn_cutoff = 0.25, for_background = False, numWorkers=1, storeInterCNN = True, considerTopHit = True):
-	
-	global Prob_Attention_All# = res_test[3]
-	global Seqs# = res_test[6]
-	global LabelPreds# = res_test[4]
-	global Filter_Intr_Attn
-	global Filter_Intr_Pos
-	global Filter_Intr_Keys
-	global Filter_Intr_Attn_neg
-	global Filter_Intr_Pos_neg
-	global tp_pos_dict
-
-	
-	final_all = [['Batch','ExNo','SeqHeader','SingleHeadNo','PositionA','PositionB','AveragePosDiff','AttnScore','PositionAInfo','PositionBInfo']]
-	count = 0		
-	for k in range(0,len(Prob_Attention_All)): #going through all batches
-		start_time = time.time()
-		if count == seq_limit: #break if seq_limit number of sequences tested
-			break
-		
-		PAttn = Prob_Attention_All[k]
-		if storeInterCNN:
-			with open(PAttn,'rb') as f:
-				PAttn = pickle.load(f)
-		
-		#PAttn = PAttn.detach().cpu().numpy()
-		feat_size = PAttn.shape[1]
-		per_batch_labelPreds = LabelPreds[k]
-		
-		if num_labels == 2:
-			if for_background and argSpace.intBackground != None:
-				tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==0 and per_batch_labelPreds[i][1]<(1-pos_score_cutoff))]
-			else:
-				tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)]
-		else:
-			#tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
-			if argSpace.useAll == True:
-				tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
-			else:
-				tp_indices=[] 
-				TPs = {}                                                                                                                                                                                   
-				batch_labels = per_batch_labelPreds['labels']                                                                                                                                                                         
-				batch_preds = per_batch_labelPreds['preds']   
-				headers = np.asarray(Seqs[k][:,0])                                                                                                                                                                        
-				for e in range(0,batch_labels.shape[0]):                                                                                                                                                                        
-					ex_labels = batch_labels[e].astype(int)                                                                                                                                                                     
-					ex_preds = batch_preds[e]                                                                                                                                                                                   
-					ex_preds = np.asarray([i>=0.5 for i in ex_preds]).astype(int)    
-					prec = metrics.precision_score(ex_labels,ex_preds)         
-					if prec >= argSpace.precisionLimit:   
-						TP = [i for i in range(0,ex_labels.shape[0]) if (ex_labels[i]==1 and ex_preds[i]==1)] #these are going to be used in calculating attributes: average accross only those columns which are true positives                                                                                                                               
-						tp_indices.append(e)
-						tp_pos_dict[headers[e]] = TP
-						TPs[e] = TP
-		
-		#if for_background:
-		#	tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==0 and per_batch_labelPreds[i][1]<(1-pos_score_cutoff))] #neg classified examples < (1-0.6)
-		#else:
-		#	tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)] #pos classified examples > 0.6
-		
-		#just use seqs that are relevant
-		Seqs_tp = Seqs[k][tp_indices]
-		print('generating sequence position information...')
-		seq_info_dict = get_filters_in_seq_dict(Seqs_tp,motif_dir,num_filters,CNNfirstpool,numWorkers=numWorkers)
-		print('Done!')
-		
-		#tp_indices = tp_indices[:10] #get top 5 from each batch
-		fdata = []
-		for ex in tp_indices:
-			header = np.asarray(Seqs[k])[ex][0]
-			fdata.append([count,header,seq_info_dict[header],k,ex,params,tomtom_data,attn_cutoff,sequence_len,CNNfirstpool,num_filters,motif_dir,feat_size,storeInterCNN, considerTopHit])
-			count += 1
-			if count == seq_limit:
-				break
-			
-			##ex = 1#4
-			#header = np.asarray(Seqs[k])[ex][0]
-			
-			##############------New Code-------###############
-			#score_individual_head(ex,PAttn,params,attn_cutoff,sequence_len,CNNfirstpool,num_filters,motif_dir,feat_size)
-		with Pool(processes = numWorkers) as pool:
-			result = pool.map(score_individual_head, fdata, chunksize=1)
-		#pdb.set_trace()
-		for element in result:
-			bid = element[0]
-			if for_background == False:
-				Filter_Intr_Pos[:,bid] = element[2]
-				Filter_Intr_Attn[:,bid] = element[1]
-			else:
-				Filter_Intr_Pos_neg[:,bid] = element[2]
-				Filter_Intr_Attn_neg[:,bid] = element[1]
-		
-		#pdb.set_trace()	
-			#final_all += [entry for ent in result for entry in ent] #unravel 
-
-		end_time = time.time()
-		if argSpace.verbose:	
-			print("Done for Batch: ",k, "Sequences Done: ",count, "Time Taken: %d seconds"%round(end_time-start_time))
-				#print("Done for batch: ",k, "example: ",ex, "count: ",count)
-	pop_size = count * params['numMultiHeads'] #* int(np.ceil(attn_cutoff)) #total sequences tested x # multi heads x number of top attn scores allowed
-	#return final_all, pop_size
-	return pop_size
-
-def estimate_interactions_bg(num_filters, params, tomtom_data, motif_dir, verbose = False, CNNfirstpool = 6, sequence_len = 200, pos_score_cutoff = 0.65, seq_limit = -1, attn_cutoff = 0.25, for_background = False, numWorkers=1, storeInterCNN = True, considerTopHit = True):
-	
-	global Prob_Attention_All_neg# = res_test[3]
-	global Seqs_neg# = res_test[6]
-	global LabelPreds_neg# = res_test[4]
-	global Filter_Intr_Attn_neg
-	global Filter_Intr_Pos_neg
-	global Filter_Intr_Keys
-	global tp_pos_dict
-	
-	final_all = [['Batch','ExNo','SeqHeader','SingleHeadNo','PositionA','PositionB','AveragePosDiff','AttnScore','PositionAInfo','PositionBInfo']]
-	count = 0		
-	for k in range(0,len(Prob_Attention_All_neg)): #going through all batches
-		start_time = time.time()
-		if count == seq_limit: #break if seq_limit number of sequences tested
-			break
-		
-		PAttn = Prob_Attention_All_neg[k]
-		if storeInterCNN:
-			with open(PAttn,'rb') as f:
-				PAttn = pickle.load(f)
-		
-		#PAttn = PAttn.detach().cpu().numpy()
-		feat_size = PAttn.shape[1]
-		per_batch_labelPreds = LabelPreds_neg[k]
-		
-		if num_labels == 2:
-			if for_background:
-				tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0])]
-			else:
-				tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)]
-			#if for_background and argSpace.intBackground != None:
-			#	tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==0 and per_batch_labelPreds[i][1]<(1-pos_score_cutoff))]
-			#else:
-			#	tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)]
-		else:
-			#tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
-			if argSpace.useAll==True:
-				tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
-			else:
-				#tp_indices,TPs = get_TP_info(headers,tp_pos_dict)
-				tp_indices = []
-				TPs = {}
-				headers = np.asarray(Seqs_neg[k][:,0])
-				#stime = datetime.now()
-				for h_i in range(0,len(headers)):
-					header = headers[h_i]
-					if header in tp_pos_dict:
-						tp_indices.append(h_i)
-						TPs[h_i] = tp_pos_dict[header]
-				#print('loop time bg: ',datetime.now()-stime)
-		#if for_background:
-		#	tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==0 and per_batch_labelPreds[i][1]<(1-pos_score_cutoff))] #neg classified examples < (1-0.6)
-		#else:
-		#	tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)] #pos classified examples > 0.6
-		
-		#tp_indices = tp_indices[:10] #get top 5 from each batch
-		#just use sequences that are relevant
-		Seqs_tp = Seqs_neg[k][tp_indices]
-		print('Generating sequence position information...')
-		#seq_info_dict = get_filters_in_seq_dict(Seqs_neg[k],motif_dir_neg,num_filters,CNNfirstpool,numWorkers=numWorkers)
-		seq_info_dict = get_filters_in_seq_dict(Seqs_tp,motif_dir_neg,num_filters,CNNfirstpool,numWorkers=numWorkers)
-		print('Done!')
-		
-		
-		fdata = []
-		for ex in tp_indices:
-			header = np.asarray(Seqs_neg[k])[ex][0]
-			fdata.append([count,header,seq_info_dict[header],k,ex,params,tomtom_data,attn_cutoff,sequence_len,CNNfirstpool,num_filters,motif_dir,feat_size,storeInterCNN, considerTopHit])
-			count += 1
-			if count == seq_limit:
-				break
-			
-			##ex = 1#4
-			#header = np.asarray(Seqs[k])[ex][0]
-			
-			##############------New Code-------###############
-			#score_individual_head(ex,PAttn,params,attn_cutoff,sequence_len,CNNfirstpool,num_filters,motif_dir,feat_size)
-		with Pool(processes = numWorkers) as pool:
-			result = pool.map(score_individual_head_bg, fdata, chunksize=1)
-		
-		for element in result:
-			bid = element[0]
-			Filter_Intr_Pos_neg[:,bid] = element[2]
-			Filter_Intr_Attn_neg[:,bid] = element[1]
-		
-		#pdb.set_trace()	
-			#final_all += [entry for ent in result for entry in ent] #unravel 
-
-		end_time = time.time()
-		if argSpace.verbose:	
-			print("Done for Batch: ",k, "Sequences Done: ",count, "Time Taken: %d seconds"%round(end_time-start_time))
-				#print("Done for batch: ",k, "example: ",ex, "count: ",count)
-	pop_size = count * params['numMultiHeads'] #* int(np.ceil(attn_cutoff)) #total sequences tested x # multi heads x number of top attn scores allowed
-	#return final_all, pop_size
-	return pop_size
-
-def get_stats(Main_Res,Main_Pop,tomtomdata, considerTopHit = True):
-	filter_dict = {}                                                                                                                                                                               
-	for entry in Main_Res[1:]:    
-	    header = entry[2]                                                                                                                                                             
-	    A = entry[-2].split(',')                                                                                                                                                                   
-	    B = entry[-1].split(',')                                                                                                                                                                   
-	    for enA in A:                                                                                                                                                                              
-	        if enA.split(':')[2] == '-':                                                                                                                                                           
-	            continue                                                                                                                                                                           
-	        for enB in B:                                                                                                                                                                          
-	            if enB.split(':')[2] == '-':                                                                                                                                                       
-	                continue                                                                                                                                                                       
-	            if enA.split(':')[2] == enB.split(':')[2]:                                                                                                                                         
-	                continue                                                                                                                                                                       
-	                
-	            intr = enA.split(':')[2]+'<-->'+enB.split(':')[2]
-	            intr_rev = enB.split(':')[2]+'<-->'+enA.split(':')[2]
-	            if (intr not in filter_dict) and (intr_rev not in filter_dict):
-	                filter_dict[intr] = [header, 0,0,1, [entry[6]]]
-	            else:
-	                if intr in filter_dict:
-	                    if filter_dict[intr][0] != header:
-	                        filter_dict[intr][0] = header
-	                        filter_dict[intr][-2] += 1
-	                        filter_dict[intr][-1].append(entry[6])  
-	                elif intr_rev in filter_dict:
-	                    if filter_dict[intr_rev][0] != header:
-	                        filter_dict[intr_rev][0] = header
-	                        filter_dict[intr_rev][-2] += 1
-	                        filter_dict[intr_rev][-1].append(entry[6]) 
-	            
-	            
-	#pdb.set_trace()
-	#motifs = list(set(tomtom_data[1:,1])) 
-	#motifs_dict = {}                                                                                                                                                                               
-	#for entry in motifs:                                                                                                                                                                           
-	#	motifs_dict[entry] = [0, []]    
-	motifs_dict = {}	
-	for i in range(0,num_filters):
-		fltr = 'filter'+str(i)
-		res = tomtomdata[np.argwhere(tomtomdata[:,0]==fltr).flatten()] 
-		if len(res)!=0:
-			if considerTopHit:
-				res = res[np.argmin(res[:,5])][1] ###############!!!!!!!!!!!!!!!!!!! convert to float!!
-				if res not in motifs_dict:
-					motifs_dict[res] = [1, [fltr]]
-				else:
-					motifs_dict[res][0] += 1
-					motifs_dict[res][1].append(fltr)
-			else:
-				ress = res[:,1]
-				for res in ress:
-					if res not in motifs_dict:
-						motifs_dict[res] = [1, [fltr]]
-					else:
-						motifs_dict[res][0] += 1
-						motifs_dict[res][1].append(fltr)
-	
-	for key in filter_dict:
-		flag = False
-		keyA, keyB = key.split('<-->')
-		
-		if keyA in motifs_dict:
-			lA = motifs_dict[keyA][1]
-		else:
-			flag = True
-		if keyB in motifs_dict:
-			lB = motifs_dict[keyB][1]
-		else:
-			flag = True
-		
-		nA = len(list(set(lA)-set(lB)))
-		nB = len(list(set(lB)-set(lA)))
-		
-		
-		#nA,nB = len(lA),len(lB)
-		if nA == 0 or nB == 0:
-			flag = True
-		
-		if flag:
-			filter_dict[key] = ['-',0, 0, 0, []]
-			continue
-		
-		total_comp = nA*nB
-		normalize_val = total_comp * Main_Pop
-		
-		filter_dict[key][1] = filter_dict[key][-2]
-		filter_dict[key][2] = normalize_val
-		filter_dict[key][-2] = filter_dict[key][1]/normalize_val
-	
-	return filter_dict
-
-def get_motifs_interactions(fltr_intr_keys,tomtomData,considerTopHit=True,noHeaderTomTom = False):
-	fltr_to_motif_dict = {}
-	
-	if noHeaderTomTom:
-		motifsA = list(set(tomtomData[:,1]))
-		motifsB = list(set(tomtomData[:,1]))
-	else:	
-		motifsA = list(set(tomtomData[1:,1]))
-		motifsB = list(set(tomtomData[1:,1]))
-	
-	for mA in motifsA:
-		for mB in motifsB:
-			if mA != mB:
-				resA = tomtomData[np.argwhere(tomtomData[:,1]==mA).flatten()]
-				resB = tomtomData[np.argwhere(tomtomData[:,1]==mB).flatten()]
-				
-				fltrA = resA[np.argmin(resA[:,5].astype(float))][0]
-				fltrB = resB[np.argmin(resB[:,5].astype(float))][0]
-				
-				if fltrA == fltrB:
-					continue
-				key = fltrA+'<-->'+fltrB
-				
-				keyM = mA+'<-->'+mB
-				rev_keyM = mB+'<-->'+mA
-				
-				if keyM not in fltr_to_motif_dict and rev_keyM not in fltr_to_motif_dict:
-						fltr_to_motif_dict[keyM] = [key]
-
-			
-	
-	#for key in fltr_intr_keys:
-		#fltrA,fltrB = key.split('<-->')
-		#resA = tomtomData[np.argwhere(tomtomData[:,0]==fltrA).flatten()]
-		#resB = tomtomData[np.argwhere(tomtomData[:,0]==fltrB).flatten()]
-		#if len(resA)!=0:
-			#if considerTopHit:
-				#resA = [resA[np.argmin(resA[:,5].astype(float))][1]]
-			#else:
-				#resA = resA[:,1].tolist()
-		#else:
-			#continue
-			
-		#if len(resB)!=0:
-			#if considerTopHit:
-				#resB = [resB[np.argmin(resB[:,5].astype(float))][1]]
-			#else:
-				#resB = resB[:,1].tolist()	
-		#else:
-			#continue
-			
-		#for mA in resA:
-			#for mB in resB:
-				#if mA != mB:
-					#keyM = mA+'<-->'+mB
-					#rev_keyM = mB+'<-->'+mA
-					#if keyM not in fltr_to_motif_dict and rev_keyM not in fltr_to_motif_dict:
-						#fltr_to_motif_dict[keyM] = [key]
-					#else:
-						#if keyM in fltr_to_motif_dict:
-							#if key not in fltr_to_motif_dict[keyM]:
-								#fltr_to_motif_dict[keyM].append(key)
-						#elif rev_keyM in fltr_to_motif_dict:
-							#if key not in fltr_to_motif_dict[rev_keyM]:
-								#fltr_to_motif_dict[rev_keyM].append(key)
-						
-						
-						
-	#				if key not in fltr_to_motif_dict:
-	#					fltr_to_motif_dict[key] = [keyM]
-	#				else:
-	#					if keyM not in fltr_to_motif_dict[key] and rev_keyM not in fltr_to_motif_dict[key]:
-	#						fltr_to_motif_dict[key].append(keyM)
-	
-	
-	return fltr_to_motif_dict
-
-
-from scipy.stats import mannwhitneyu
-from datetime import datetime
-
-			
-	
-				
-
-
-
-if argSpace.featInteractions:
-	Interact_dir = output_dir + '/Interactions_Results_v9_run2'
-
-	if not os.path.exists(Interact_dir):
-	    os.makedirs(Interact_dir)
-	
-	#add this functionality later
-	#background = get_background_seqs(Seqs, bg_type = argSpace.intBackground, limit = argSpace.intSeqLimit)
-	tomtom_data = np.loadtxt(motif_dir+'/tomtom/tomtom.tsv',dtype=str,delimiter='\t')
-	if argSpace.intBackground != None:
-		tomtom_data_neg = np.loadtxt(motif_dir_neg+'/tomtom/tomtom.tsv',dtype=str,delimiter='\t')
-	num_filters = params['CNN_filters']
-	CNNfirstpool = params['CNN_poolsize']
-	sequence_len = len(res_test[6][0][0][1])
-	
-	Prob_Attention_All = res_test[3]
-	Seqs = res_test[6]
-	LabelPreds = res_test[4]
-	
-	Filter_Intr_Keys = {}
-	count_index = 0
-	for i in range(0,num_filters):
-		for j in range(0,num_filters):
-			if i == j:
-				continue
-			intr = 'filter'+str(i)+'<-->'+'filter'+str(j)
-			rev_intr = 'filter'+str(j)+'<-->'+'filter'+str(i)
-			
-			if intr not in Filter_Intr_Keys and rev_intr not in Filter_Intr_Keys:
-				Filter_Intr_Keys[intr] = count_index
-				count_index += 1
-	
-			
-	Filter_Intr_Attn = np.ones((len(Filter_Intr_Keys),numPosExamples))*-1
-	Filter_Intr_Pos = np.ones((len(Filter_Intr_Keys),numPosExamples)).astype(int)*-1
-	tp_pos_dict = {}
-	
-	startTime = datetime.now()
-	Main_Pop = estimate_interactions(num_filters, params, tomtom_data, motif_dir, verbose = argSpace.verbose, CNNfirstpool = CNNfirstpool, 
-											   sequence_len = sequence_len, pos_score_cutoff = argSpace.scoreCutoff, seq_limit = argSpace.intSeqLimit, attn_cutoff = argSpace.attnCutoff,
-											   for_background = False, numWorkers = argSpace.numWorkers, storeInterCNN = argSpace.storeInterCNN, considerTopHit = argSpace.considerTopHit) #argSpace.intSeqLimit
-	main_time = datetime.now() - startTime
-	#print(lohahi)
-	
-	Filter_Intr_Attn_neg = np.ones((len(Filter_Intr_Keys),numNegExamples))*-1
-	Filter_Intr_Pos_neg = np.ones((len(Filter_Intr_Keys),numNegExamples)).astype(int)*-1
-	
-	startTime = datetime.now()
-	if argSpace.intBackground == 'negative':
-		Bg_Pop = estimate_interactions(num_filters, params, tomtom_data_neg, motif_dir_neg, verbose = argSpace.verbose, CNNfirstpool = CNNfirstpool, 
-											   sequence_len = sequence_len, pos_score_cutoff = argSpace.scoreCutoff, seq_limit = argSpace.intSeqLimit, attn_cutoff = argSpace.attnCutoff,
-											   for_background = True, numWorkers = argSpace.numWorkers, storeInterCNN = argSpace.storeInterCNN, considerTopHit = argSpace.considerTopHit) 
-	
-	elif argSpace.intBackground == 'shuffle':
-		Prob_Attention_All_neg = res_test_bg[3]
-		Seqs_neg = res_test_bg[6]
-		LabelPreds_neg = res_test_bg[4]
-
-		
-		Bg_Pop = estimate_interactions_bg(num_filters, params, tomtom_data_neg, motif_dir_neg, verbose = argSpace.verbose, CNNfirstpool = CNNfirstpool, 
-											   sequence_len = sequence_len, pos_score_cutoff = argSpace.scoreCutoff, seq_limit = argSpace.intSeqLimit, attn_cutoff = argSpace.attnCutoff,
-											   for_background = True, numWorkers = argSpace.numWorkers, storeInterCNN = argSpace.storeInterCNN, considerTopHit = argSpace.considerTopHit) 
-	
-	bg_time = datetime.now() - startTime
-	
-	#Main_Res, Main_Pop = estimate_interactions(res_test[6], res_test[3], res_test[4], num_filters, params, tomtom_data, motif_dir, verbose = argSpace.verbose, CNNfirstpool = CNNfirstpool, 
-	#					  sequence_len = sequence_len, pos_score_cutoff = argSpace.scoreCutoff, seq_limit = argSpace.intSeqLimit, attn_cutoff = argSpace.attnCutoff, for_background = False, numWorkers = argSpace.argSpace.numWorkers) #argSpace.intSeqLimit
-	
-	
-	#Bg_Res, Bg_Pop = estimate_interactions(res_test[6], res_test[3], res_test[4], num_filters, params, tomtom_data_neg, motif_dir_neg, verbose = argSpace.verbose, CNNfirstpool = CNNfirstpool,
-	#					  sequence_len = sequence_len, pos_score_cutoff = argSpace.scoreCutoff, seq_limit = argSpace.intSeqLimit , attn_cutoff = argSpace.attnCutoff, for_background = True, numWorkers = argSpace.argSpace.numWorkers) #argSpace.intSeqLimit
-		
-	
-	
-	#attnLimit = argSpace.attnCutoff if argSpace.attnCutoff != -1 else 0.10#np.mean(Filter_Intr_Attn[Filter_Intr_Attn!=-1])
-	#print(attnLimit)
-	
-	time_taken = [['main_loop','bg_loop','total']]
-	time_taken.append([main_time.total_seconds(),bg_time.total_seconds(),main_time.total_seconds()+bg_time.total_seconds()])
-
-	np.savetxt(Interact_dir+'/timing_stats.txt',time_taken,fmt='%s',delimiter='\t')
-
-
-	
-	with open(Interact_dir+'/interaction_keys_dict.pckl','wb') as f:
-		pickle.dump(Filter_Intr_Keys,f)
-	
-	with open(Interact_dir+'/background_results_raw.pckl','wb') as f:
-		pickle.dump([Filter_Intr_Attn_neg,Filter_Intr_Pos_neg],f)
-		
-	
-	with open(Interact_dir+'/main_results_raw.pckl','wb') as f:
-		pickle.dump([Filter_Intr_Attn,Filter_Intr_Pos],f)
-		
-	
-	
-	
-	
-	
-	resMain = Filter_Intr_Attn[Filter_Intr_Attn!=-1]                                                                                                                                               
-	resBg = Filter_Intr_Attn_neg[Filter_Intr_Attn_neg!=-1]
-	resMainHist = np.histogram(resMain,bins=20)
-	resBgHist = np.histogram(resBg,bins=20)
-	plt.plot(resMainHist[1][1:],resMainHist[0]/sum(resMainHist[0]),linestyle='--',marker='o',color='g',label='main')
-	plt.plot(resBgHist[1][1:],resBgHist[0]/sum(resBgHist[0]),linestyle='--',marker='x',color='r',label='background')
-
-	plt.legend(loc='best',fontsize=10)
-	plt.savefig(Interact_dir+'/normalized_Attn_scores_distributions.pdf')
-	plt.clf()
-	
-	plt.hist(resMain,bins=20,color='g',label='main')
-	plt.hist(resBg,bins=20,color='r',alpha=0.5,label='background')
-	plt.legend(loc='best',fontsize=10)
-	plt.savefig(Interact_dir+'/Attn_scores_distributions.pdf')
-	plt.clf()
-	
-	
-	Bg_MaxMean = []
-	Main_MaxMean = []
-	
-	for entry in Filter_Intr_Attn:
-		try:
-			Main_MaxMean.append([np.max(entry[entry!=-1]),np.mean(entry[entry!=-1])])
-		except:
-			continue
-		
-	for entry in Filter_Intr_Attn_neg:
-		try:
-			Bg_MaxMean.append([np.max(entry[entry!=-1]),np.mean(entry[entry!=-1])])
-		except:
-			continue
-		
-	Bg_MaxMean = np.asarray(Bg_MaxMean)
-	Main_MaxMean = np.asarray(Main_MaxMean)
-	
-	plt.hist(Main_MaxMean[:,0],bins=20,color='g',label='main')
-	plt.hist(Bg_MaxMean[:,0],bins=20,color='r',alpha=0.5,label='background')
-	plt.legend(loc='best',fontsize=10)
-	plt.savefig(Interact_dir+'/Attn_scores_distributions_MaxPerInteraction.pdf')
-	plt.clf()
-	
-	plt.hist(Main_MaxMean[:,1],bins=20,color='g',label='main')
-	plt.hist(Bg_MaxMean[:,1],bins=20,color='r',alpha=0.5,label='background')
-	plt.legend(loc='best',fontsize=10)
-	plt.savefig(Interact_dir+'/Attn_scores_distributions_MeanPerInteraction.pdf')
-	plt.clf()
-	
-	
-	
-	
-	attnLimits = [argSpace.attnCutoff * i for i in range(1,11)] #save results for 10 different attention cutoff values (maximum per interaction) eg. [0.05, 0.10, 0.15, 0.20, 0.25, ...]
-	
-	for attnLimit in attnLimits:
-		pval_info = []#{}
-		for i in range(0,Filter_Intr_Attn.shape[0]):                                                                                                                                                   
-			pos_attn = Filter_Intr_Attn[i,:]                                                                                                                                                              
-			pos_attn = pos_attn[pos_attn!=-1]#pos_attn[pos_attn>0.04] #pos_attn[pos_attn!=-1]                                                                                                                                                                   
-			neg_attn = Filter_Intr_Attn_neg[i,:]                                                                                                                                                          
-			neg_attn = neg_attn[neg_attn!=-1]#neg_attn[neg_attn>0.04] #neg_attn[neg_attn!=-1] 
-			
-			
-			num_pos = len(pos_attn)
-			num_neg = len(neg_attn)
-			
-			if len(pos_attn) <= 1:# or len(neg_attn) <= 1:
-				continue
-			
-			if len(neg_attn) <= 1: #if just 1 or 0 values in neg attn, get a vector with all values set to 0 (same length as pos_attn)
-				neg_attn = np.asarray([0 for i in range(0,num_pos)])
-			
-			if np.max(pos_attn) < attnLimit: # 
-				continue
-			
-			pos_posn = Filter_Intr_Pos[i,:]  
-			#pos_posn_mean = pos_posn[pos_posn!=-1].mean()
-			pos_posn_mean = pos_posn[np.argmax(Filter_Intr_Attn[i,:])] #just pick the max
-			
-			neg_posn = Filter_Intr_Pos_neg[i,:]  
-			#neg_posn_mean = neg_posn[neg_posn!=-1].mean()
-			neg_posn_mean = neg_posn[np.argmax(Filter_Intr_Attn_neg[i,:])] #just pick the max
-			                                                                                                                                                                
-	                                                                                                                                                                              
-			stats,pval = mannwhitneyu(pos_attn,neg_attn,alternative='greater')#ttest_ind(pos_d,neg_d)#mannwhitneyu(pos_d,neg_d,alternative='greater')                                                        
-			pval_info.append([i, pos_posn_mean, neg_posn_mean,num_pos,num_neg, stats,pval])#pval_dict[i] = [i,stats,pval]                                                                                                                                                              
-			#if i%100==0:                                                                                                                                                                               
-			#	print('Done: ',i) 
-		
-		
-		pval_info = np.asarray(pval_info)
-		
-		res_final = pval_info#[pval_info[:,-1]<0.01] #can be 0.05 or any other threshold #For now, lets take care of this in post processing (jupyter notebook)
-		
-		res_final_int = []                                                                                                                                                                             
-	                                                                                                                                                                     
-		for i in range(0,res_final.shape[0]):                                                                                                                                                          
-			#res_final_int.append([res_final[i][-1],Filter_Intr_Keys[int(res_final[i][0])]])                                                                                                           
-			value = int(res_final[i][0])                                                                                                                                                               
-			pval = res_final[i][-1]
-			pp_mean = res_final[i][1]
-			np_mean = res_final[i][2]  
-			num_pos = res_final[i][3]
-			num_neg = res_final[i][4]         
-			stats = res_final[i][-2]                                                                                                                                                         
-			for key in Filter_Intr_Keys:                                                                                                                                                               
-				if Filter_Intr_Keys[key] == value:                                                                                                                                                     
-					res_final_int.append([key,value,pp_mean,np_mean,num_pos,num_neg,stats,pval])  
-		
-		res_final_int = np.asarray(res_final_int) 
-		qvals = multipletests(res_final_int[:,-1].astype(float), method='fdr_bh')[1] #res_final_int[:,1].astype(float)
-		res_final_int = np.column_stack((res_final_int,qvals))
-		
-		final_interactions = [['filter_interaction','example_no','motif1','motif1_qval','motif2','motif2_qval','mean_distance','mean_distance_bg','num_obs','num_obs_bg','pval','adjusted_pval']]
-		for entry in res_final_int:                                                                                                                                                                    
-			f1,f2 = entry[0].split('<-->')                                                                                                                                                             
-	                                                                                                                                                                      
-			m1_ind = np.argwhere(tomtom_data[:,0]==f1)                                                                                                                                                 
-			m2_ind = np.argwhere(tomtom_data[:,0]==f2)                                                                                                                                                 
-			#print(m1_ind,m2_ind)
-			if len(m1_ind) == 0 or len(m2_ind) == 0:
-				continue
-			m1 = tomtom_data[m1_ind[0][0]][1]
-			m2 = tomtom_data[m2_ind[0][0]][1]
-			m1_pval = tomtom_data[m1_ind[0][0]][5]
-			m2_pval = tomtom_data[m2_ind[0][0]][5]
-			final_interactions.append([entry[0],entry[1],m1,m1_pval,m2,m2_pval,entry[2],entry[3],entry[4],entry[5],entry[-2],entry[-1]])
-			#print(entry[-1],m1,m2,entry[0])
-		
-		
-		np.savetxt(Interact_dir+'/interactions_summary_attnLimit-'+str(attnLimit)+'.txt',final_interactions,fmt='%s',delimiter='\t')
-		
-		with open(Interact_dir+'/processed_results_attnLimit-'+str(attnLimit)+'.pckl','wb') as f:
-			pickle.dump([pval_info,res_final_int],f)
-		
-		print("Done for Attention Cutoff Value: ",str(attnLimit))
-		
-
-	
-	
-	
-	#res_dct = get_motifs_interactions(Filter_Intr_Keys,tomtom_data,considerTopHit=argSpace.considerTopHit) 
-	#res_dct_neg = get_motifs_interactions(Filter_Intr_Keys,tomtom_data_neg,considerTopHit=argSpace.considerTopHit) 
-				
-	##attn_cutoff = 0.5 * np.max(Filter_Intr_Attn) #half of the maximum					
-	#sig_vals = [['interaction','Pos_population','Neg_population','mean-distance_Pos','mean-distance_Neg','observed_pos','observed_bg','MW_stat','p-value']]
-	##scipy.stats
-	#for key in res_dct:	
-		#fltrs_intrs_pos = res_dct[key][0]
-		#fltrA_pos, fltrB_pos = fltrs_intrs_pos.split('<-->')
-		#fltrs_intrs_pos_rev = fltrB_pos+'<-->'+fltrA_pos
-		
-		#if fltrs_intrs_pos in Filter_Intr_Keys:
-			#pos_index = Filter_Intr_Keys[fltrs_intrs_pos]
-		#else:
-			#pos_index = Filter_Intr_Keys[fltrs_intrs_pos_rev]
-		
-		#Positions_pos = Filter_Intr_Pos[pos_index,:]
-		#Position_pos_mean = Positions_pos[Positions_pos!= -1].mean()
-		
-		#Attentions_pos = Filter_Intr_Attn[pos_index,:]
-		#Attentions_pos = Attentions_pos[Attentions_pos!= -1]
-		
-		##if np.max(Attentions_pos) < attn_cutoff:
-		##	continue
-		
-		#if key in res_dct_neg:
-			#fltrs_intrs_neg = res_dct_neg[key][0]
-			#fltrA_neg, fltrB_neg = fltrs_intrs_neg.split('<-->')
-			#fltrs_intrs_neg_rev = fltrB_neg+'<-->'+fltrA_neg
-	
-			#if fltrs_intrs_neg in Filter_Intr_Keys:
-				#neg_index = Filter_Intr_Keys[fltrs_intrs_neg]
-			#else:
-				#neg_index = Filter_Intr_Keys[fltrs_intrs_neg_rev]
-		
-			#Positions_neg = Filter_Intr_Pos_neg[neg_index,:]
-			#Position_neg_mean = Positions_neg[Positions_neg!= -1].mean()		
-			
-			#Attentions_neg = Filter_Intr_Attn_neg[neg_index,:]
-			#Attentions_neg = Attentions_neg[Attentions_neg!= -1]
-			#stat,pval = mannwhitneyu(Attentions_pos,Attentions_neg,alternative='greater')
-			#sig_vals.append([key,numPosExamples,numNegExamples,Position_pos_mean,Position_neg_mean,len(Attentions_pos),len(Attentions_neg),stat,pval])	
-		#else:
-			#Position_neg_mean = '-'
-			#Attentions_neg = np.asarray([0 for i in range(0,Attentions_pos.shape[0])]) #assign 0 attention values when there is no interaction in the background/negative set
-			#stat,pval = mannwhitneyu(Attentions_pos,Attentions_neg,alternative='greater')
-			#sig_vals.append([key,numPosExamples,numNegExamples,Position_pos_mean,Position_neg_mean,len(Attentions_pos),0,stat,pval])	
-					
-		
-				
-	#sig_vals = np.asarray(sig_vals)
-	#qvals = multipletests(sig_vals[1:,-1].astype(float), method='fdr_bh')[1]  #bh p-value adjustment
-	#qvals = np.asarray(qvals).astype(str)
-			
-	#qvals = np.concatenate((np.asarray(['adjusted_p-value']),qvals), axis=0)
-	#sig_vals = np.column_stack((sig_vals,qvals))	
-	
-	#np.savetxt(Interact_dir+'/interactions_summary.txt',sig_vals,fmt='%s',delimiter='\t')
-	
-#########################################################################################################################	
-#----------This tests the proportions of embedded motifs in the positive and negative data (simulated data example)-----#
-#########################################################################################################################
-def get_keys(ress,pos_dict):
-    result = []
-    for em in ress:
-        for emb in ress:
-            if em != emb:
-               key = em+'-'+emb
-               #print(key)
-               if key in pos_dict:
-                   result.append(key)
-    return result
+def evaluateRegularBatch(net, batch, criterion):
     
-def get_intr(simData):
-	pos_dict = {'ELF1-SIX5':0, 'ELF1-TAL1':0, 'ELF1-AP1':0,'SIX5-TAL1':0, 'SIX5-AP1':0, 'AP1-TAL1':0}
-	neg_dict = {'ELF1-SIX5':0, 'ELF1-TAL1':0, 'ELF1-AP1':0,'SIX5-TAL1':0, 'SIX5-AP1':0, 'AP1-TAL1':0}        
-	countPos = 0
-	countNeg = 0
-	for m in range(0,simData.shape[0]):
-		hdr = simData[m][0]
-		res = simData[m][-1].split(',')
-		ress = list(set([em.split('_')[1] for em in res]))
-		if 'Pos:1' in hdr:
-			countPos += 1
-			poskeys = get_keys(ress,pos_dict)
-			for key in poskeys:
-				rev_key = key.split('-')[1]+'-'+key.split('-')[0]
-				if key in pos_dict:
-					pos_dict[key] += 1
-				elif rev_key in pos_dict:
-					pos_dict[rev_key] += 1
-		else:
-			countNeg += 1
-			negkeys = get_keys(ress,neg_dict)
-			for key in negkeys:
-				rev_key = key.split('-')[1]+'-'+key.split('-')[0]
-				if key in neg_dict:
-					neg_dict[key] += 1
-				elif rev_key in neg_dict:
-					neg_dict[rev_key] += 1    
-
-	return pos_dict,neg_dict  
+	running_loss = 0.0
+	valid_auc = []
+    
+	net.eval()
+    
+	with torch.no_grad():
+		
+		headers, seqs, data, target = batch
+		data, target = data.to(device,dtype=torch.float), target.to(device,dtype=torch.long)
+		# Model computations
+		outputs = net(data)
+		
+		loss = criterion(outputs, target)
+		#loss = F.binary_cross_entropy(outputs, target)
+		
+		softmax = torch.nn.Softmax(dim=1)
+		
+		
+		labels=target.cpu().numpy()
+		
+		pred = softmax(outputs)
 
 
-test_motif_proportions = False 
-if test_motif_proportions:
-	pos_headers,neg_headers = [],[]
-	pos_count,neg_count = 0,0
-	for k in range(0,len(LabelPreds)):
-	    label_preds = LabelPreds[k]
-	    seqs = Seqs[k]
-	    for i in range(0,label_preds.shape[0]):
-	        if label_preds[i][0] > 0.65:
-	            if pos_count <= 1500:
-	                pos_headers.append(seqs[i][0])
-	            pos_count += 1
-	        elif label_preds[i][0] < 0.35:
-	            if neg_count <= 1500:
-	                neg_headers.append(seqs[i][0])
-	            neg_count += 1
-	
-	all_headers = pos_headers+neg_headers	
-	
-	simData = np.loadtxt('/s/jawar/h/nobackup/fahad/Human_Chromatin/Kundaji_DFIM_Data/dfim/data/embedded_motif_ours/sim_metadata.txt',delimiter='\t',dtype=str)	
-	
-	final_simData = []
-	
-	for i in range(0,simData.shape[0]):
-	    header = '>'+simData[i][0]
-	    if header in all_headers:
-	        final_simData.append(simData[i].tolist())
+		pred=pred.cpu().detach().numpy()
+		
+		label_pred = np.column_stack((labels,pred[:,1]))
+		#per_batch_labelPreds[batch_idx] = label_pred
+		#roc = np.row_stack((roc,label_pred))
+		
+		#print(pred)
+		try:
+			valid_auc.append(metrics.roc_auc_score(labels, pred[:,1]))
+		except:
+			valid_auc.append(0.0)
+		
+		
+		running_loss += loss.item()
+		
+		headers_seqs = np.column_stack((headers,seqs))
+
+            
+           
+        
+	return running_loss,valid_auc,label_pred,headers_seqs
 	
 	
-	final_simData = np.asarray(final_simData)
-	pos_dict,neg_dict = get_intr(final_simData)
-#############################################################################################################################		
 	
+	
+def evaluateRegularBatchMC(net, batch, criterion):
+    
+	running_loss = 0.0
+	valid_auc = []
+	per_batch_labelPreds = {}
+	net.eval()
+    
+	with torch.no_grad():	
+		headers, seqs, data, target = batch
+		data, target = data.to(device,dtype=torch.float), target.to(device, dtype=torch.float)
+		
+		outputs = net(data)
+		
+		loss = criterion(outputs, target)
+		
+		labels=target.cpu().numpy()
+		
+		#softmax = torch.nn.Softmax(dim=0) #along columns
+		#pred = softmax(outputs)
+		
+		sigmoid = torch.nn.Sigmoid()
+		pred = sigmoid(outputs)
+		
+		pred = pred.cpu().detach().numpy()
+		
+		label_pred = {'labels':labels,'preds':pred}
+		
+		per_batch_labelPreds = label_pred
+	
+		headers_seqs = np.column_stack((headers,seqs))
+            
+
+            
+		running_loss += loss.item()
+        
+	return running_loss,valid_auc,per_batch_labelPreds,headers_seqs
+	
+	
+
+def get_seq_index(source_seq):
+	nc_dict = {'A':0,'C':1,'G':2,'T':3}
+	return [nc_dict[nc] for nc in source_seq]
+
+#process_motif(seq,srcPos,seq_GC)
+#def process_motif(seq,source,seq_GC)
+def process_motif(seq,srcPos,fltrSize,seq_GC): 
+	source_seq = seq[srcPos:srcPos+fltrSize]
+	source_seq_ind = get_seq_index(source_seq)
+	
+	prob_dist = [(1-seq_GC)/2, seq_GC/2, seq_GC/2, (1-seq_GC)/2] # prob. dist for [A,C,G,T]
+	
+	res = np.random.choice(['A','C','G','T'], fltrSize, p=prob_dist)
+		
+	return ''.join(res),source_seq,source_seq_ind
+		
+def one_hot_encode(seq):
+	mapping = dict(zip("ACGT", range(4)))    
+	seq2 = [mapping[i] for i in seq]
+	return np.eye(4)[seq2].T.astype(np.long)	
+
+def generate_reference(seqLen, seq_GC=0.46):
+
+	prob_dist = [(1-seq_GC)/2, seq_GC/2, seq_GC/2, (1-seq_GC)/2] # prob. dist for [A,C,G,T]
+	
+	res = np.random.choice(['A','C','G','T'], seqLen, p=prob_dist)
+	
+	return res
+	
+#net = Generalized_Net(params, genPAttn, wvmodel = modelwv, numClasses = num_labels).to(device) 
+#try:    
+	#checkpoint = torch.load(saved_model_dir+'/model')
+	#net.load_state_dict(checkpoint['model_state_dict'])
+	#optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+	#epoch = checkpoint['epoch']
+	#loss = checkpoint['loss']
+#except:
+	#print("No pre-trained model found! Please run with --mode set to train.")
   
+
+
+
+Intr_dir = output_dir + '/Interactions'
+
+if not os.path.exists(Intr_dir):
+	os.makedirs(Intr_dir)
+
+
+
+#metadata = pd.read_csv('/s/jawar/h/nobackup/fahad/Human_Chromatin/Kundaji_DFIM_Data/dfim/data/embedded_motif_ours/sim_metadata.txt',sep='\t')
+
+
+
+net = Generalized_Net(params, genPAttn, wvmodel = modelwv, numClasses = num_labels)
+try:    
+	checkpoint = torch.load(saved_model_dir+'/model')
+	net.load_state_dict(checkpoint['model_state_dict'])
+	optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+	epoch = checkpoint['epoch']
+	loss = checkpoint['loss']
+except:
+	print("No pre-trained model found! Please run with --mode set to train.")
+
+model = net.to(device)
+
+
+model.eval()
+
+torch.backends.cudnn.enabled=False
+	
+#dl = IntegratedGradients(model)#DeepLiftShap(model)#IntegratedGradients(model)#DeepLift(model)
+
+#final_res = [['batch','example','source','target','FIS','FISbg']]
+
+#from https://github.com/pytorch/captum/issues/171
+def model_wrapper(inputs, targets, TPs):
+	#pdb.set_trace()
+	#targets, TPs = add_args
+	output = model(inputs)
+	output = output[:,TPs]
+	targets = targets[:,TPs]
+    #print(inputs.shape, output.shape, targets.shape)
+    # element-wise multiply outputs with one-hot encoded targets 
+    # and compute sum of each row
+    # This sums the prediction for all markers which exist in the cell
+    #rx = output * targets
+    #print(rx)
+	return torch.sum(output * targets, dim=0)
     
+
+#use the following
+if num_labels == 2:
+	dl = IntegratedGradients(model)
+else:
+	dl = IntegratedGradients(model_wrapper)
+#attributions = dl.attribute(test_points,baseline,additional_forward_args=target[i].unsqueeze(dim=0))
+
+######-------------------------Some Notes---------------------------############
+#1. For a single position, I am selecting filter with the highest activation
+#   This is different than SATORI since there I considered all filters.
+#   I am doing this to reduce the overhead while calculating all interactions
+
+################################################################################
+from datetime import datetime
+startTime = datetime.now()
+
+#print(lohahi)
+for_background = False
+num_filters = params['CNN_filters']
+CNNfirstpool = params['CNN_poolsize'] 
+CNNfiltersize = params['CNN_filtersize']
+sequence_len = len(res_test[-1][0][1])
+#GC_content of the train set sequences
+GC_content = GC(''.join(train_loader.dataset.df_seq_final['sequence'][train_indices].values))/100 #0.46 #argSpace.gcContent
+
+Filter_Intr_Keys = {}
+count_index = 0
+for i in range(0,num_filters):
+	for j in range(0,num_filters):
+		if i == j:
+			continue
+		intr = 'filter'+str(i)+'<-->'+'filter'+str(j)
+		rev_intr = 'filter'+str(j)+'<-->'+'filter'+str(i)
+		
+		if intr not in Filter_Intr_Keys and rev_intr not in Filter_Intr_Keys:
+			Filter_Intr_Keys[intr] = count_index
+			count_index += 1
+
+
+
+Filter_Intr_Attn = np.ones((len(Filter_Intr_Keys),numPosExamples))*-1
+Filter_Intr_Pos = np.ones((len(Filter_Intr_Keys),numPosExamples)).astype(int)*-1
+
+col_index = 0
+tp_pos_dict = {}
+for batch_idx, batch in enumerate(test_loader):
+	
+	if col_index >= numPosExamples:
+			break
+	
+	if num_labels == 2:
+		res_test = evaluateRegularBatch(net,batch,criterion)
+	else:
+		res_test = evaluateRegularBatchMC(net,batch,criterion)
+	
+	Seqs = res_test[-1]
+	per_batch_labelPreds = res_test[-2]
 	
 	
+	headers,seqs,datapoints,target = batch
+
+	if num_labels == 2:
+		if for_background and argSpace.intBackground != None:
+			tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==0 and per_batch_labelPreds[i][1]<(1-pos_score_cutoff))]
+		else:
+			tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)]
+	else:
+		#tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
+		if argSpace.useAll == True:
+			tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
+		else:
+			tp_indices=[] 
+			TPs = {}                                                                                                                                                                                   
+			batch_labels = per_batch_labelPreds['labels']                                                                                                                                                                         
+			batch_preds = per_batch_labelPreds['preds']                                                                                                                                                                           
+			for e in range(0,batch_labels.shape[0]):                                                                                                                                                                        
+				ex_labels = batch_labels[e].astype(int)                                                                                                                                                                     
+				ex_preds = batch_preds[e]                                                                                                                                                                                   
+				ex_preds = np.asarray([i>=0.5 for i in ex_preds]).astype(int)    
+				prec = metrics.precision_score(ex_labels,ex_preds)         
+				if prec >= argSpace.precisionLimit:   
+					TP = [i for i in range(0,ex_labels.shape[0]) if (ex_labels[i]==1 and ex_preds[i]==1)] #these are going to be used in calculating attributes: average accross only those columns which are true positives                                                                                                                               
+					tp_indices.append(e)
+					tp_pos_dict[headers[e]] = TP
+					TPs[e] = TP
+	print(len(tp_indices))
+	#pos_ex_ind = [(i,res_test[2][i][1],target[i]) for i in range(0,res_test[2].shape[0]) if res_test[2][i][1]>0.5 and target[i]==1] 
 	
+	Seqs_tp = Seqs[tp_indices]
+	
+	seq_info_dict = get_filters_in_seq_dict(Seqs_tp,motif_dir,num_filters,CNNfirstpool,numWorkers=argSpace.numWorkers)
+
+	
+	if num_labels == 2:
+		datapoints, target = datapoints.to(device,dtype=torch.float), target.to(device,dtype=torch.long)
+	else:
+		datapoints, target = datapoints.to(device,dtype=torch.float), target.to(device,dtype=torch.float)
+
+	for ind in range(0, len(tp_indices)):#i_pos in range(0,len(pos_ex_ind)):
+		i = tp_indices[ind]
+		#i = pos_ex_ind[i_pos][0]
+		#baseline = torch.zeros(1, 4, 600)#datapoints[:100]#torch.zeros(3, 4, 600).to(device)
+		test_points = datapoints[i]#i
+		
+		##this baseline assumes all 0s
+		#baseline = test_points*0#
+		
+		##this baseline should be used with deepLIFTSHAP
+		#baseline = datapoints[:100]#test_points*0
+		
+		#-----------------------------------------------------------------------------------#
+		#---This can be put outside the loop since baseline won't change for fixed GC (at least this case, simulated)---#
+		##Kundaje et al mentioned that they used baseline based on the background GC content
+		baseline_seq = generate_reference(test_points.shape[-1], seq_GC = GC_content) #0.46 was for the simulated data
+		baseline = one_hot_encode(baseline_seq) 
+		
+		baseline = torch.Tensor(baseline).to(device, dtype=torch.float)
+		#------------------------------------------------------------------------------------#
+		
+		test_points = test_points.unsqueeze(dim=0)
+		baseline = baseline.unsqueeze(dim=0)
+		
+		#suggestion from captum developer
+		
+		
+		if num_labels == 2:
+			attributions = dl.attribute(test_points,baseline,target=target[i])
+		else:
+			attributions = dl.attribute(test_points,baseline,additional_forward_args=(target[i].unsqueeze(dim=0),TPs[i]))
+		
+		#pdb.set_trace()
+		res = attributions.squeeze(dim=0).cpu().detach().numpy()
+		#res = normalize(res, norm='l2')
+		
+		
+		
+		#res_max = np.max(res,axis=0) don't need the max value; instead we need to pick the corresponding nucleotide value 
+		
+		#--to visualize and save the attribution across input--#
+		#viz_sequence.plot_weights(res,subticks_frequency=50,figsize=(20,4))
+		#plt.savefig('somefile.png')
+		#------------------------------------------------------#
+		
+		
+			
+		
+		#-------after mutating source--------#
+		header = headers[i]
+		seq = seqs[i]
+		
+		
+		seq_GC = GC(seq)/100.0 #GC is from Bio.Utils #this is used to mutate source motif (GC content of the current input seq)
+		
+		
+		
+		
+
+		pos_and_filters = seq_info_dict[header]
+		
+		
+		tpnt_tuple = torch.tensor([]).to(device)
+		bsln_tuple = torch.tensor([]).to(device)
+		if num_labels==2:
+			trgt_tuple = torch.tensor([]).to(device,dtype=torch.long)
+		else:
+			trgt_tuple = torch.tensor([]).to(device,dtype=torch.float)
+		#intr_tuple = []
+		#pos_tuple = []
+		#trgPos_tuple = []
+		#trgInd_tuple = []
+		count_part = 0
+		srcPos_info = {} #keeps track of interactions info
+		count_srcInd = 0
+		covered_intr_tuple = []
+		for srcPos in pos_and_filters:
+
+			#moving source part here
+			source_mutated, source_seq, source_ind = process_motif(seq,srcPos,CNNfiltersize,seq_GC)
+			seq_mutated = seq[:srcPos] + source_mutated + seq[srcPos+CNNfiltersize:]	
+			mut_data = one_hot_encode(seq_mutated)
+			test_points_mut = torch.Tensor(mut_data).to(device, dtype=torch.float)
+
+			#-----------------------------------------------------------------------------------#
+			##Kundaje et al mentioned that they used baseline based on the background GC content
+			baseline_mut_seq = generate_reference(test_points_mut.shape[-1], seq_GC = GC_content) #0.46 was for the simulated data
+			baseline_mut = one_hot_encode(baseline_mut_seq) 
+		
+			baseline_mut = torch.Tensor(baseline_mut).to(device, dtype=torch.float)
+			#------------------------------------------------------------------------------------#
+
+			test_points_mut = test_points_mut.unsqueeze(dim=0)
+			baseline_mut = baseline_mut.unsqueeze(dim=0)
+
+			tpnt_tuple = torch.cat((tpnt_tuple,test_points_mut),dim=0)
+			bsln_tuple = torch.cat((bsln_tuple,baseline_mut),dim=0)
+			trgt_tuple = torch.cat((trgt_tuple,target[i].unsqueeze(dim=0)))
+			
+			#print(pos_and_filters[srcPos])
+			intr_tuple = []
+			pos_tuple = []
+			trgPos_tuple = []
+			trgInd_tuple = []
+			for trgPos in pos_and_filters:
+				if abs(srcPos-trgPos) < CNNfirstpool: #Similar to what I do in self-attention; discard attention values at row == column (this is after pooling, where poolsize should be used)
+					continue
+				srcFilter = pos_and_filters[srcPos][0][0]
+				trgFilter = pos_and_filters[trgPos][0][0]
+				
+				intr = srcFilter + '<-->' + trgFilter
+				if intr not in Filter_Intr_Keys:
+					intr = trgFilter + '<-->' + srcFilter
+					
+				if intr in covered_intr_tuple: #if already covered
+					continue
+				
+				
+				if srcFilter == trgFilter: #they can't be the same for interaction
+					continue
+				
+				intr_tuple.append(intr)
+
+				#for tracking
+				covered_intr_tuple.append(intr)
+
+				pos_diff = abs(srcPos-trgPos)
+				pos_tuple.append(pos_diff)
+				
+				target_mutated, target_seq, target_ind = process_motif(seq,trgPos,CNNfiltersize,seq_GC) ##not needed but we need some of the info later
+				
+				trgPos_tuple.append(trgPos)
+				trgInd_tuple.append(target_ind)
+				
+				count_part += 1
+			srcPos_info[count_srcInd] = [intr_tuple,pos_tuple,trgPos_tuple,trgInd_tuple]
+			count_srcInd += 1
+		print('# filter comparisons: ',count_part)
+		
+		for bsize in range(0,len(srcPos_info),argSpace.attrBatchSize): #trying 96 at a time, otherwise it runs out of CUDA memory (too many tensors to test). 172 also fails. I guess 120 will work
+			start = bsize
+			end = min([bsize+argSpace.attrBatchSize,len(srcPos_info)])
+			
+			if num_labels == 2:
+				attributions_mut = dl.attribute(tpnt_tuple[start:end],bsln_tuple[start:end],target=trgt_tuple[start:end])
+			else:
+				attributions_mut = dl.attribute(tpnt_tuple[start:end],bsln_tuple[start:end],additional_forward_args=(trgt_tuple[start:end],TPs[i]))
+			
+			count_sbsize = 0
+			for sbsize in range(start,end):
+
+				intr_tuple_sub = srcPos_info[sbsize][0]
+				pos_tuple_sub = srcPos_info[sbsize][1]
+				trgPos_tuple_sub = srcPos_info[sbsize][2]
+				trgInd_tuple_sub = srcPos_info[sbsize][3]
+
+				res_mut = attributions_mut[count_sbsize,:,:].squeeze(dim=0).cpu().detach().numpy()
+				count_sbsize += 1
+				for subsize in range(0,len(intr_tuple_sub)):
+					
+					#res_mut = normalize(res_mut, norm='l2')
+			
+					#res_mut_max = np.max(res_mut,axis=0)
+					
+					trgPos = trgPos_tuple_sub[subsize]
+					target_ind = trgInd_tuple_sub[subsize]
+					
+					C_orig = res[:,trgPos:trgPos+CNNfiltersize]
+					C_orig = np.sum([C_orig[target_ind[i],i] for i in range(0,len(target_ind))])
+					
+					C_mut = res_mut[:,trgPos:trgPos+CNNfiltersize]
+					C_mut = np.sum([C_mut[target_ind[i],i] for i in range(0,len(target_ind))])
+					
+					FIS = C_orig - C_mut
+					
+					
+					intr = intr_tuple_sub[subsize]
+					
+					row_index = Filter_Intr_Keys[intr]
+					
+					Filter_Intr_Attn[row_index][col_index] = abs(FIS) #ideally we shouldn't take absolute but to compare it to SATORI, we need the abs
+					
+					
+					
+					Filter_Intr_Pos[row_index][col_index] = pos_tuple_sub[subsize]
+
+		
+		col_index += 1
+	
+
+		print('batch: ',batch_idx,'example: ',i)
+		
+		if col_index >= numPosExamples:
+			break
+
+
+with open(Intr_dir+'/interaction_keys_dict.pckl','wb') as f:
+	pickle.dump(Filter_Intr_Keys,f)
+		
+	
+with open(Intr_dir+'/main_results_raw.pckl','wb') as f:
+	pickle.dump([Filter_Intr_Attn,Filter_Intr_Pos],f)
+
+
+
+
+main_time = datetime.now() - startTime
+
+
+
+
+
+
+
+#print(lohahi)
+
+if argSpace.intBackground == 'shuffle':
+	bg_prefix = get_shuffled_background_v3(test_loader,argSpace) #get_shuffled_background_v2(test_loader, params['CNN_filters'], params['CNN_filtersize'], argSpace)  the version 2 doesn't work that well (average AUC 0.50 and 0 motifs in background)
+	#data_bg = ProcessedDataVersion2(bg_prefix,num_labels)
+	if argSpace.deskLoad == False:
+		data_bg = ProcessedDataVersion2(bg_prefix,num_labels) #get all data
+	else:
+		data_bg = ProcessedDataVersion2A(bg_prefix,num_labels)
+			
+	test_loader_bg = DataLoader(data_bg,batch_size=batchSize,num_workers=argSpace.numWorkers)	
+	res_test_bg = evaluateRegularMC(net, test_loader_bg, criterion, out_dirc = output_dir+"/Temp_Data/Stored_Values", getPAttn = False,#genPAttn,
+											storePAttn = argSpace.storeInterCNN, getCNN = getCNNout,
+											storeCNNout = argSpace.storeInterCNN, getSeqs = getSequences)
+
+
+
+#############---------For background--------------##########
+
+startTime = datetime.now()
+
+if num_labels == 2:
+	dl = IntegratedGradients(model)
+else:
+	dl = IntegratedGradients(model_wrapper)
+
+
+for_background = True
+
+if argSpace.intBackground == 'shuffle':
+	test_loader = test_loader_bg
+
+Filter_Intr_Attn_Bg = np.ones((len(Filter_Intr_Keys),numNegExamples))*-1
+Filter_Intr_Pos_Bg = np.ones((len(Filter_Intr_Keys),numNegExamples)).astype(int)*-1
+
+col_index = 0
+for batch_idx, batch in enumerate(test_loader):
+	
+	if col_index >= numNegExamples:
+			break
+	
+	if num_labels == 2:
+		res_test = evaluateRegularBatch(net,batch,criterion)
+	else:
+		res_test = evaluateRegularBatchMC(net,batch,criterion)
+	
+	Seqs = res_test[-1]
+	per_batch_labelPreds = res_test[-2]
+	
+	headers,seqs,datapoints,target = batch
+	
+	if num_labels == 2:
+		if for_background and argSpace.intBackground != None:
+			tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==0 and per_batch_labelPreds[i][1]<(1-pos_score_cutoff))]
+		else:
+			tp_indices = [i for i in range(0,per_batch_labelPreds.shape[0]) if (per_batch_labelPreds[i][0]==1 and per_batch_labelPreds[i][1]>pos_score_cutoff)]
+	else:
+		if argSpace.useAll==True:
+			tp_indices = [i for i in range(0,per_batch_labelPreds['labels'].shape[0])]
+		else:
+			#tp_indices,TPs = get_TP_info(headers,tp_pos_dict)
+			tp_indices = []
+			TPs = {}
+			for h_i in range(0,len(headers)):
+				header = headers[h_i]
+				if header in tp_pos_dict:
+					tp_indices.append(h_i)
+					TPs[h_i] = tp_pos_dict[header]
+	
+	#pos_ex_ind = [(i,res_test[2][i][1],target[i]) for i in range(0,res_test[2].shape[0]) if res_test[2][i][1]>0.5 and target[i]==1] 
+	
+	Seqs_tp = Seqs[tp_indices]
+	
+	seq_info_dict = get_filters_in_seq_dict(Seqs_tp,motif_dir_neg,num_filters,CNNfirstpool,numWorkers=argSpace.numWorkers)
+
+	
+	if num_labels == 2:
+		datapoints, target = datapoints.to(device,dtype=torch.float), target.to(device,dtype=torch.long)
+	else:
+		datapoints, target = datapoints.to(device,dtype=torch.float), target.to(device,dtype=torch.float)
+
+	for ind in range(0, len(tp_indices)):#i_pos in range(0,len(pos_ex_ind)):
+		i = tp_indices[ind]
+		#i = pos_ex_ind[i_pos][0]
+		#baseline = torch.zeros(1, 4, 600)#datapoints[:100]#torch.zeros(3, 4, 600).to(device)
+		test_points = datapoints[i]#i
+		
+		##this baseline assumes all 0s
+		baseline = test_points*0#
+		
+		##this baseline should be used with deepLIFTSHAP
+		#baseline = datapoints[:100]#test_points*0
+		
+		#-----------------------------------------------------------------------------------#
+		#---This can be put outside the loop since baseline won't change for fixed GC (at least this case, simulated)---#
+		##Kundaje et al mentioned that they used baseline based on the background GC content
+		baseline_seq = generate_reference(test_points.shape[-1], seq_GC = GC_content) #0.46 was for the simulated data
+		baseline = one_hot_encode(baseline_seq) 
+		
+		baseline = torch.Tensor(baseline).to(device, dtype=torch.float)
+		#------------------------------------------------------------------------------------#
+		
+		test_points = test_points.unsqueeze(dim=0)
+		baseline = baseline.unsqueeze(dim=0)
+		
+		#suggestion from captum developer
+		
+		
+		if num_labels == 2:
+			attributions = dl.attribute(test_points,baseline,target=target[i])
+		else:
+			attributions = dl.attribute(test_points,baseline,additional_forward_args=(target[i].unsqueeze(dim=0),TPs[i]))
+		
+		res = attributions.squeeze(dim=0).cpu().detach().numpy()
+		#res = normalize(res, norm='l2') #normalization maybe is causing problems
+		
+		
+		
+		#res_max = np.max(res,axis=0) don't need the max value; instead we need to pick the corresponding nucleotide value 
+		
+		#--to visualize and save the attribution across input--#
+		#viz_sequence.plot_weights(res,subticks_frequency=50,figsize=(20,4))
+		#plt.savefig('somefile.png')
+		#------------------------------------------------------#
+		
+		
+			
+		
+		#-------after mutating source--------#
+		header = headers[i]
+		seq = seqs[i]
+		
+		
+		seq_GC = GC(seq)/100.0 #GC is from Bio.Utils #this is used to mutate source motif (GC content of the current input seq)
+		
+		
+		pos_and_filters = seq_info_dict[header]
+		
+		intr_tuple = []
+		tpnt_tuple = torch.tensor([]).to(device)
+		bsln_tuple = torch.tensor([]).to(device)
+
+		if num_labels==2:
+			trgt_tuple = torch.tensor([]).to(device,dtype=torch.long)
+		else:
+			trgt_tuple = torch.tensor([]).to(device,dtype=torch.float)
+		#intr_tuple = []
+		#pos_tuple = []
+		#trgPos_tuple = []
+		#trgInd_tuple = []
+		count_part = 0
+		srcPos_info = {} #keeps track of interactions info
+		count_srcInd = 0
+		covered_intr_tuple = []
+		for srcPos in pos_and_filters:
+
+			#moving source part here
+			source_mutated, source_seq, source_ind = process_motif(seq,srcPos,CNNfiltersize,seq_GC)
+			seq_mutated = seq[:srcPos] + source_mutated + seq[srcPos+CNNfiltersize:]	
+			mut_data = one_hot_encode(seq_mutated)
+			test_points_mut = torch.Tensor(mut_data).to(device, dtype=torch.float)
+
+			#-----------------------------------------------------------------------------------#
+			##Kundaje et al mentioned that they used baseline based on the background GC content
+			baseline_mut_seq = generate_reference(test_points_mut.shape[-1], seq_GC = GC_content) #0.46 was for the simulated data
+			baseline_mut = one_hot_encode(baseline_mut_seq) 
+		
+			baseline_mut = torch.Tensor(baseline_mut).to(device, dtype=torch.float)
+			#------------------------------------------------------------------------------------#
+
+			test_points_mut = test_points_mut.unsqueeze(dim=0)
+			baseline_mut = baseline_mut.unsqueeze(dim=0)
+
+			tpnt_tuple = torch.cat((tpnt_tuple,test_points_mut),dim=0)
+			bsln_tuple = torch.cat((bsln_tuple,baseline_mut),dim=0)
+			trgt_tuple = torch.cat((trgt_tuple,target[i].unsqueeze(dim=0)))
+
+
+			#print(pos_and_filters[srcPos])
+			intr_tuple = []
+			pos_tuple = []
+			trgPos_tuple = []
+			trgInd_tuple = []
+			for trgPos in pos_and_filters:
+				if abs(srcPos-trgPos) < CNNfirstpool: #Similar to what I do in self-attention; discard attention values at row == column (this is after pooling, where poolsize should be used)
+					continue
+				srcFilter = pos_and_filters[srcPos][0][0]
+				trgFilter = pos_and_filters[trgPos][0][0]
+				
+				intr = srcFilter + '<-->' + trgFilter
+				if intr not in Filter_Intr_Keys:
+					intr = trgFilter + '<-->' + srcFilter
+					
+				if intr in covered_intr_tuple: #if already covered
+					continue
+				
+				
+				if srcFilter == trgFilter: #they can't be the same for interaction
+					continue
+				
+				intr_tuple.append(intr)
+
+                #for tracking
+				covered_intr_tuple.append(intr)
+				
+				pos_diff = abs(srcPos-trgPos)
+				pos_tuple.append(pos_diff)
+				
+				target_mutated, target_seq, target_ind = process_motif(seq,trgPos,CNNfiltersize,seq_GC) ##not needed but we need some of the info later
+				
+				trgPos_tuple.append(trgPos)
+				trgInd_tuple.append(target_ind)
+
+				count_part += 1
+			srcPos_info[count_srcInd] = [intr_tuple,pos_tuple,trgPos_tuple,trgInd_tuple]
+			count_srcInd += 1
+		print('# filter comparisons: ',count_part)
+		
+		for bsize in range(0,len(srcPos_info),argSpace.attrBatchSize): #trying 96 at a time, otherwise it runs out of CUDA memory (too many tensors to test). 172 also fails. I guess 120 will work
+			start = bsize
+			end = min([bsize+argSpace.attrBatchSize,len(srcPos_info)])
+			
+			if num_labels == 2:
+				attributions_mut = dl.attribute(tpnt_tuple[start:end],bsln_tuple[start:end],target=trgt_tuple[start:end])
+			else:
+				attributions_mut = dl.attribute(tpnt_tuple[start:end],bsln_tuple[start:end],additional_forward_args=(trgt_tuple[start:end],TPs[i]))
+			
+			count_sbsize = 0
+			for sbsize in range(start,end):
+
+				intr_tuple_sub = srcPos_info[sbsize][0]
+				pos_tuple_sub = srcPos_info[sbsize][1]
+				trgPos_tuple_sub = srcPos_info[sbsize][2]
+				trgInd_tuple_sub = srcPos_info[sbsize][3]
+
+				res_mut = attributions_mut[count_sbsize,:,:].squeeze(dim=0).cpu().detach().numpy()
+				count_sbsize += 1
+				for subsize in range(0,len(intr_tuple_sub)):
+					
+					#res_mut = normalize(res_mut, norm='l2')
+			
+					#res_mut_max = np.max(res_mut,axis=0)
+					
+					trgPos = trgPos_tuple_sub[subsize]
+					target_ind = trgInd_tuple_sub[subsize]
+					
+					C_orig = res[:,trgPos:trgPos+CNNfiltersize]
+					C_orig = np.sum([C_orig[target_ind[i],i] for i in range(0,len(target_ind))])
+					
+					C_mut = res_mut[:,trgPos:trgPos+CNNfiltersize]
+					C_mut = np.sum([C_mut[target_ind[i],i] for i in range(0,len(target_ind))])
+					
+					FIS = C_orig - C_mut
+					
+					
+					intr = intr_tuple_sub[subsize]
+					
+					row_index = Filter_Intr_Keys[intr]
+
+					Filter_Intr_Attn_Bg[row_index][col_index] = abs(FIS) #ideally we shouldn't take absolute but to compare it to SATORI, we need the abs
+				
+				
+				
+					Filter_Intr_Pos_Bg[row_index][col_index] = pos_tuple_sub[subsize]
+	
+				
+						
+		col_index += 1
+	
+
+		print('batch: ',batch_idx,'example: ',i)
+		
+		if col_index >= numNegExamples:
+			break
+
+
+with open(Intr_dir+'/background_results_raw.pckl','wb') as f:
+	pickle.dump([Filter_Intr_Attn_Bg,Filter_Intr_Pos_Bg],f)
+
+
+
+bg_time = datetime.now() - startTime
+
+
+
+
+##############################################################################
+#--------------------------motif interactions analysis-----------------------#
+##############################################################################
+tomtom_data = np.loadtxt(motif_dir+'/tomtom/tomtom.tsv',dtype=str,delimiter='\t')
+if argSpace.intBackground != None:
+	tomtom_data_neg = np.loadtxt(motif_dir_neg+'/tomtom/tomtom.tsv',dtype=str,delimiter='\t')
+
+
+
+
+resMain = Filter_Intr_Attn[Filter_Intr_Attn!=-1]                                                                                                                                               
+resBg = Filter_Intr_Attn_Bg[Filter_Intr_Attn_Bg!=-1]
+resMainHist = np.histogram(resMain,bins=20)
+resBgHist = np.histogram(resBg,bins=20)
+plt.plot(resMainHist[1][1:],resMainHist[0]/sum(resMainHist[0]),linestyle='--',marker='o',color='g',label='main')
+plt.plot(resBgHist[1][1:],resBgHist[0]/sum(resBgHist[0]),linestyle='--',marker='x',color='r',label='background')
+
+plt.legend(loc='best',fontsize=10)
+plt.savefig(Intr_dir+'/normalized_Attn_scores_distributions.pdf')
+plt.clf()
+
+plt.hist(resMain,bins=20,color='g',label='main')
+plt.hist(resBg,bins=20,color='r',alpha=0.5,label='background')
+plt.legend(loc='best',fontsize=10)
+plt.savefig(Intr_dir+'/Attn_scores_distributions.pdf')
+plt.clf()
+
+
+Bg_MaxMean = []
+Main_MaxMean = []
+
+for entry in Filter_Intr_Attn:
+	try:
+		Main_MaxMean.append([np.max(entry[entry!=-1]),np.mean(entry[entry!=-1])])
+	except:
+		continue
+	
+for entry in Filter_Intr_Attn_Bg:
+	try:
+		Bg_MaxMean.append([np.max(entry[entry!=-1]),np.mean(entry[entry!=-1])])
+	except:
+		continue
+	
+Bg_MaxMean = np.asarray(Bg_MaxMean)
+Main_MaxMean = np.asarray(Main_MaxMean)
+
+plt.hist(Main_MaxMean[:,0],bins=20,color='g',label='main')
+plt.hist(Bg_MaxMean[:,0],bins=20,color='r',alpha=0.5,label='background')
+plt.legend(loc='best',fontsize=10)
+plt.savefig(Intr_dir+'/Attn_scores_distributions_MaxPerInteraction.pdf')
+plt.clf()
+
+plt.hist(Main_MaxMean[:,1],bins=20,color='g',label='main')
+plt.hist(Bg_MaxMean[:,1],bins=20,color='r',alpha=0.5,label='background')
+plt.legend(loc='best',fontsize=10)
+plt.savefig(Intr_dir+'/Attn_scores_distributions_MeanPerInteraction.pdf')
+plt.clf()
+
+
+
+
+
+
+#dummy in this case, we are not dropping values based on the attnLimit
+attnLimits = [0]#[argSpace.attnCutoff * i for i in range(1,11)] #save results for 10 different attention cutoff values (maximum per interaction) eg. [0.05, 0.10, 0.15, 0.20, 0.25, ...]
+
+for attnLimit in attnLimits:
+	pval_info = []#{}
+	for i in range(0,Filter_Intr_Attn.shape[0]):                                                                                                                                                   
+		pos_attn = Filter_Intr_Attn[i,:]                                                                                                                                                              
+		pos_attn = pos_attn[pos_attn!=-1]#pos_attn[pos_attn>0.04] #pos_attn[pos_attn!=-1]                                                                                                                                                                   
+		neg_attn = Filter_Intr_Attn_Bg[i,:]                                                                                                                                                          
+		neg_attn = neg_attn[neg_attn!=-1]#neg_attn[neg_attn>0.04] #neg_attn[neg_attn!=-1] 
+		
+		
+		num_pos = len(pos_attn)
+		num_neg = len(neg_attn)
+		
+		if len(pos_attn) <= 1:# or len(neg_attn) <= 1:
+			continue
+		
+		if len(neg_attn) <= 1: #if just 1 or 0 values in neg attn, get a vector with all values set to 0 (same length as pos_attn)
+			neg_attn = np.asarray([0 for i in range(0,num_pos)])
+		
+		if np.max(pos_attn) < attnLimit: # 
+			continue
+		
+		pos_posn = Filter_Intr_Pos[i,:]  
+		#pos_posn_mean = pos_posn[pos_posn!=-1].mean()
+		pos_posn_mean = pos_posn[np.argmax(Filter_Intr_Attn[i,:])] #just pick the max
+		
+		neg_posn = Filter_Intr_Pos_Bg[i,:]  
+		#neg_posn_mean = neg_posn[neg_posn!=-1].mean()
+		neg_posn_mean = neg_posn[np.argmax(Filter_Intr_Attn_Bg[i,:])] #just pick the max
+		                                                                                                                                                                
+                                                                                                                                                                              
+		stats,pval = mannwhitneyu(pos_attn,neg_attn,alternative='greater')#ttest_ind(pos_d,neg_d)#mannwhitneyu(pos_d,neg_d,alternative='greater')                                                        
+		pval_info.append([i, pos_posn_mean, neg_posn_mean,num_pos,num_neg, stats,pval])#pval_dict[i] = [i,stats,pval]                                                                                                                                                              
+		#if i%100==0:                                                                                                                                                                               
+		#	print('Done: ',i) 
+	
+	
+	pval_info = np.asarray(pval_info)
+	
+	res_final = pval_info#[pval_info[:,-1]<0.01] #can be 0.05 or any other threshold #For now, lets take care of this in post processing (jupyter notebook)
+	
+	res_final_int = []                                                                                                                                                                             
+                                                                                                                                                                     
+	for i in range(0,res_final.shape[0]):                                                                                                                                                          
+		#res_final_int.append([res_final[i][-1],Filter_Intr_Keys[int(res_final[i][0])]])                                                                                                           
+		value = int(res_final[i][0])                                                                                                                                                               
+		pval = res_final[i][-1]
+		pp_mean = res_final[i][1]
+		np_mean = res_final[i][2]  
+		num_pos = res_final[i][3]
+		num_neg = res_final[i][4]         
+		stats = res_final[i][-2]                                                                                                                                                         
+		for key in Filter_Intr_Keys:                                                                                                                                                               
+			if Filter_Intr_Keys[key] == value:                                                                                                                                                     
+				res_final_int.append([key,value,pp_mean,np_mean,num_pos,num_neg,stats,pval])  
+	
+	res_final_int = np.asarray(res_final_int) 
+	qvals = multipletests(res_final_int[:,-1].astype(float), method='fdr_bh')[1] #res_final_int[:,1].astype(float)
+	res_final_int = np.column_stack((res_final_int,qvals))
+	
+	final_interactions = [['filter_interaction','example_no','motif1','motif1_qval','motif2','motif2_qval','mean_distance','mean_distance_bg','num_obs','num_obs_bg','pval','adjusted_pval']]
+	for entry in res_final_int:                                                                                                                                                                    
+		f1,f2 = entry[0].split('<-->')                                                                                                                                                             
+                                                                                                                                                                      
+		m1_ind = np.argwhere(tomtom_data[:,0]==f1)                                                                                                                                                 
+		m2_ind = np.argwhere(tomtom_data[:,0]==f2)                                                                                                                                                 
+		#print(m1_ind,m2_ind)
+		if len(m1_ind) == 0 or len(m2_ind) == 0:
+			continue
+		m1 = tomtom_data[m1_ind[0][0]][1]
+		m2 = tomtom_data[m2_ind[0][0]][1]
+		m1_pval = tomtom_data[m1_ind[0][0]][5]
+		m2_pval = tomtom_data[m2_ind[0][0]][5]
+		final_interactions.append([entry[0],entry[1],m1,m1_pval,m2,m2_pval,entry[2],entry[3],entry[4],entry[5],entry[-2],entry[-1]])
+		#print(entry[-1],m1,m2,entry[0])
+	
+	
+	np.savetxt(Intr_dir+'/interactions_summary_attnLimit-'+str(attnLimit)+'.txt',final_interactions,fmt='%s',delimiter='\t')
+	
+	with open(Intr_dir+'/processed_results_attnLimit-'+str(attnLimit)+'.pckl','wb') as f:
+		pickle.dump([pval_info,res_final_int],f)
+	
+	print("Done for Attention Cutoff Value: ",str(attnLimit))
+
+
+time_taken = [['main_loop','bg_loop','total']]
+time_taken.append([main_time.total_seconds(),bg_time.total_seconds(),main_time.total_seconds()+bg_time.total_seconds()])
+
+np.savetxt(Intr_dir+'/timing_stats.txt',time_taken,fmt='%s',delimiter='\t')
+
+
