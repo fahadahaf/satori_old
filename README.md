@@ -1,6 +1,6 @@
 # SATORI v0.1b
 
-**Update:** Improved and revamped version of [SATORI v2](https://github.com/fahadahaf/satori_v2)  
+**Update: Improved and revamped version of [SATORI v2]**(https://github.com/fahadahaf/satori_v2)  
 **SATORI** is a **S**elf-**AT**tenti**O**n based deep learning model to capture **R**egulatory element **I**nteractions in genomic sequences. It can be used to infer a global landscape of interactions in a given genomic dataset, without a computationally-expensive post-processing step.
 
 ## Dependency
